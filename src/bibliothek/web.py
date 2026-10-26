@@ -873,11 +873,9 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         except ablage.AblageFehler as exc:
             flash(str(exc), "fehler")
             return redirect(url_for("einstellungen") + "#nas")
+        # Kein automatisches Öffnen: Der normale Browser ist meist mit dem eigenen (Admin-)Konto
+        # angemeldet. Der Link wird angezeigt und soll in einem privaten Fenster geöffnet werden.
         login.update(status="wartet", meldung="", url=flow.get("login", ""), abbrechen=False)
-        try:
-            webbrowser.open(login["url"])
-        except Exception:
-            pass
 
         def warten():
             try:

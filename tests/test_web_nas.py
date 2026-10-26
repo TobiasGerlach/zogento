@@ -175,15 +175,23 @@ def test_anmeldung_ueber_browser(client, runner, monkeypatch, dav, tmp_path):
     monkeypatch.setattr(web.webbrowser, "open", lambda url: geoeffnet.append(url))
     monkeypatch.setattr(ablage, "login_starten", lambda server: {"login": f"{server}/login/v2/flow/abc", "poll": {}})
 
+    import threading
+    bestaetigt = threading.Event()
+
     def abwarten(flow, abbruch=None, **kw):
+        bestaetigt.wait(5)          # „im Browser“ noch nicht bestätigt
         state["an"] = True
         return dict(NAS)
     monkeypatch.setattr(ablage, "login_abwarten", abwarten)
 
     assert post(client, "/nas/verbinden", {"server": "kein-url"}, follow_redirects=True).status_code == 200
-    assert not geoeffnet
     r = post(client, "/nas/verbinden", {"server": "http://nas.local:9001/"})
-    assert r.status_code == 302 and geoeffnet == ["http://nas.local:9001/login/v2/flow/abc"]
+    assert r.status_code == 302
+    seite = client.get("/einstellungen").get_data(as_text=True)
+    # Kein automatisches Öffnen (Browser wäre mit dem eigenen Konto angemeldet), Link + Hinweis stattdessen
+    assert not geoeffnet
+    assert "http://nas.local:9001/login/v2/flow/abc" in seite and "privaten Fenster" in seite
+    bestaetigt.set()
     for _ in range(50):
         if client.get("/api/nas/login").get_json()["status"] != "wartet":
             break

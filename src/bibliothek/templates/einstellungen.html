@@ -39,8 +39,10 @@
       <form method="post" action="{{ url_for('nas_trennen') }}" data-bestaetigen="Verbindung zur Nextcloud trennen? Die Dateien auf dem NAS bleiben erhalten."><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="gefaehrlich">Trennen</button></form>
     </div>
   {% elif login.status == 'wartet' %}
-    <p class="meldung hinweis" data-login-warten>Im Browser bei der Nextcloud anmelden und „Zugriff gewähren“ klicken — diese Seite aktualisiert sich dann von selbst.</p>
-    {% if login.url %}<p class="leise">Kein Browserfenster aufgegangen? <a href="{{ login.url }}" target="_blank" rel="noopener">Anmeldeseite öffnen</a></p>{% endif %}
+    <p class="meldung hinweis" data-login-warten>Diesen Link in einem <strong>privaten Fenster</strong> öffnen
+      (Safari/Chrome: ⇧⌘N, Windows/Linux: Strg+Umschalt+N) und dort als <strong>eigener Bibliotheks-Benutzer</strong>
+      anmelden — nicht mit deinem normalen Konto. Dann „Zugriff gewähren“; diese Seite aktualisiert sich von selbst.</p>
+    {% if login.url %}<p><input class="link-kopieren" type="text" readonly value="{{ login.url }}" onclick="this.select()" aria-label="Anmeldelink"></p>{% endif %}
     <form method="post" action="{{ url_for('nas_abbrechen') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Abbrechen</button></form>
   {% else %}
     {% if login.status == 'fehler' %}<p class="meldung fehler">{{ login.meldung }}</p>{% endif %}
@@ -51,7 +53,11 @@
         <label class="feld"><span>Adresse der Nextcloud</span><input name="server" placeholder="http://192.168.0.70:9001" required></label>
         <div class="knoepfe"><button type="submit">Mit Nextcloud verbinden</button></div>
       </div>
-      <p class="leise">Es öffnet sich die Anmeldeseite der Nextcloud im Browser. Das Passwort bleibt dort; die App bekommt ein eigenes App-Passwort, das im Schlüsselbund dieses Rechners liegt.</p>
+      <p class="leise"><strong>Vorher in der Nextcloud einen eigenen Benutzer nur für die Bibliothek anlegen</strong>
+        (z. B. „bibliothek“, nicht in der Gruppe admin). Ein App-Passwort gilt immer für das ganze Konto — mit einem
+        eigenen Benutzer sieht die Bibliothek nichts von deinen anderen Dateien. Admin-Konten lehnt sie ab.
+        Danach erscheint hier ein Anmeldelink; das Passwort bleibt bei der Nextcloud, die App bekommt ein eigenes
+        App-Passwort im Schlüsselbund dieses Rechners.</p>
     </form>
   {% endif %}
 </section>
