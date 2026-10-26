@@ -234,3 +234,5 @@ def test_guess_title_rejects_scanner_and_word_junk():
     assert guess_title("Microsoft Word - THE 5305 Leitfaden.docx", Path("x.pdf"))[0] == "THE 5305 Leitfaden"
     assert guess_title(None, Path("Newbigin_Griechen_Torheit-1.pdf"))[0] == "Newbigin Griechen Torheit"
     assert guess_title("Drowning Jonah", Path("x.pdf"))[0] == "Drowning Jonah"
+    assert guess_title(None, Path("03-04 Blomberg Einleitung Matthaeus copy-1.pdf"))[0] == "Blomberg Einleitung Matthaeus"
+    assert guess_title(None, Path("06 Rienecker Heiden copy.pdf"))[0] == "Rienecker Heiden"

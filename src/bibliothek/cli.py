@@ -375,27 +375,32 @@ def _print_numbering(lib: Library, item) -> None:
 
 
 def cmd_bibtex(args) -> int:
+    """Ohne Auswahl: alles. Sonst die Vereinigung aus zitierten Schlüsseln, Projekt und genannten Schlüsseln."""
     lib = _lib()
-    keys = None
-    if args.aus_tex:
+    keys: set[str] | None = None
+    missing: list[str] = []
+    if args.aus_tex or args.projekt or args.keys:
+        keys = set()
+    for tex in args.aus_tex or []:
         cited: set[str] = set()
-        for tex in args.aus_tex:
-            for path in [Path(tex)] if Path(tex).is_file() else Path(tex).rglob("*.tex"):
-                text = path.read_text(encoding="utf-8", errors="replace")
-                for m in re.finditer(r"\\\w*cite\w*\*?(?:\[[^\]]*\]){0,2}\{([^}]+)\}", text):
-                    cited.update(k.strip() for k in m.group(1).split(","))
-        missing = sorted(k for k in cited if not lib.exists(k))
-        keys = sorted(k for k in cited if lib.exists(k))
-        for k in missing:
-            print(f"! {k} wird zitiert, ist aber nicht in der Bibliothek", file=sys.stderr)
-    elif args.projekt:
-        keys = [it.citekey for it in lib.items() if args.projekt in it.projekte]
-    elif args.keys:
-        keys = [lib.resolve(k).citekey for k in args.keys]
+        for path in [Path(tex)] if Path(tex).is_file() else Path(tex).rglob("*.tex"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            text = re.sub(r"(?<!\\)%.*", "", text)  # auskommentierte Zitate zählen nicht
+            for m in re.finditer(r"\\\w*cite\w*\*?(?:\[[^\]]*\]){0,2}\{([^}]+)\}", text):
+                cited.update(k.strip() for k in m.group(1).split(",") if k.strip() and k.strip() != "*")
+        missing += sorted(k for k in cited if not lib.exists(k))
+        keys |= {k for k in cited if lib.exists(k)}
+    for projekt in args.projekt or []:
+        keys |= {it.citekey for it in lib.items() if projekt in it.projekte}
+    for k in args.keys or []:
+        keys.add(lib.resolve(k).citekey)
+    for k in missing:
+        print(f"! {k} wird zitiert, ist aber nicht in der Bibliothek (bib neu … --key {k})", file=sys.stderr)
     out = Path(args.ausgabe) if args.ausgabe else None
-    path = lib.write_refs_bib(out, keys)
-    print(f"{path} ({len(keys) if keys is not None else len(lib.keys())} Einträge)")
-    return 0
+    chosen = sorted(keys) if keys is not None else None
+    path = lib.write_refs_bib(out, chosen)
+    print(f"{path} ({len(chosen) if chosen is not None else len(lib.keys())} Einträge)")
+    return 1 if missing and args.streng else 0
 
 
 def cmd_index(args) -> int:
@@ -553,8 +558,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("bibtex", help="refs.bib schreiben (alles, Projekt, oder was eine .tex zitiert)")
     s.add_argument("keys", nargs="*")
     s.add_argument("--aus-tex", action="append", help=".tex-Datei oder Ordner; nur zitierte Einträge")
-    s.add_argument("--projekt")
+    s.add_argument("--projekt", action="append", help="alle Titel dieses Projekts (zusätzlich)")
     s.add_argument("--ausgabe", "-o")
+    s.add_argument("--streng", action="store_true", help="Fehlercode, wenn Zitiertes fehlt")
     s.set_defaults(func=cmd_bibtex)
 
     s = sub.add_parser("import-bibtex", help="Einträge aus einer .bib übernehmen")

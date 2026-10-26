@@ -198,7 +198,10 @@ def guess_title(meta_title: str | None, path: Path) -> tuple[str, str]:
     if len(t) > 3 and not _JUNK_TITLE.search(t):
         return t, "Titel aus den Dateieigenschaften — prüfen."
     stem = re.sub(r"[_]+", " ", path.stem)
-    stem = re.sub(r"[\-\s]+\d+$", "", stem).strip() or path.stem
+    stem = re.sub(r"[\-\s]+\d+$", "", stem)                       # Nummer am Ende (-1, -2)
+    stem = re.sub(r"\s+(copy|kopie)(\s*\d+)?$", "", stem, flags=re.I)  # Finder-Kopien
+    stem = re.sub(r"^\d+([\-–]\d+)?[\s.\-_]+", "", stem)          # Kursnummerierung vorne (03-04 …)
+    stem = stem.strip() or path.stem
     return stem, "Titel aus dem Dateinamen — prüfen."
 
 
