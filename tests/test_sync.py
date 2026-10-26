@@ -162,3 +162,28 @@ def test_ohne_nas_bleibt_alles_lokal(tmp_path, monkeypatch):
     assert sync.abgleichen(lib)["status"] == "kein NAS"
     assert dateien.original(lib, item, "jona.txt") == lib.folder(item.citekey) / "jona.txt"
     assert dateien.ocr_workdir(lib, "x") == lib.root / "ocr" / "x"
+
+
+def test_verbindungsabbruch_wird_wiederholt(monkeypatch, tmp_path):
+    import requests
+    from bibliothek.ablage import WebDAV
+
+    dav = WebDAV("http://nas", "u", "pw")
+    calls = []
+
+    class Antwort:
+        status_code = 201
+        headers = {"OC-ETag": '"e1"'}
+
+    def request(method, url, **kw):
+        calls.append(method)
+        if method == "PUT" and calls.count("PUT") < 3:
+            raise requests.ConnectionError("Socket is not connected")
+        return Antwort()
+
+    monkeypatch.setattr(dav.s, "request", request)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    assert dav.ablegen(f, "titel/k/a.txt") == "e1"
+    assert calls.count("PUT") == 3

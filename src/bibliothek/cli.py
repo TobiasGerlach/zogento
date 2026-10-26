@@ -511,13 +511,17 @@ def cmd_nas(args) -> int:
 
 
 def cmd_sync(args) -> int:
-    from . import sync
+    from . import ablage, sync
 
     lib = _lib()
     try:
         b = sync.abgleichen(lib, eingang=not args.ohne_eingang, fortschritt=lambda m: print("  " + m, file=sys.stderr))
     except sync.Gesperrt as exc:
         print(exc, file=sys.stderr)
+        return 1
+    except ablage.NichtErreichbar:
+        print("Verbindung zur Nextcloud unterbrochen. Bisheriges ist gesichert — `bib sync` macht dort weiter.",
+              file=sys.stderr)
         return 1
     if b["status"] != "ok":
         print({"kein NAS": "Kein NAS eingerichtet (bib nas verbinden <server>).",

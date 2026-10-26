@@ -61,11 +61,22 @@ class WebDAV:
         rel = str(PurePosixPath(rel)).lstrip("/") if rel not in ("", ".") else ""
         return self.base + ("/" + urllib.parse.quote(rel) if rel else "")
 
-    def _req(self, method: str, rel: str, **kw) -> requests.Response:
-        try:
-            r = self.s.request(method, self._url(rel), timeout=kw.pop("timeout", TIMEOUT), **kw)
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            raise NichtErreichbar(f"Nextcloud nicht erreichbar ({self.server})") from exc
+    def _req(self, method: str, rel: str, *, versuche: int = 4, **kw) -> requests.Response:
+        """Anfrage mit Wiederholung bei Verbindungsabbruch (ruhende Verbindung geschlossen, WLAN-Aussetzer).
+
+        Ein Datei-Körper (offene Datei) lässt sich nicht wiederholen — das übernimmt `ablegen`.
+        """
+        timeout = kw.pop("timeout", TIMEOUT)
+        if hasattr(kw.get("data"), "read"):
+            versuche = 1
+        for versuch in range(versuche):
+            try:
+                r = self.s.request(method, self._url(rel), timeout=timeout, **kw)
+                break
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                if versuch == versuche - 1:
+                    raise NichtErreichbar(f"Nextcloud nicht erreichbar ({self.server})") from exc
+                time.sleep(2 ** versuch)
         if r.status_code == 401:
             raise AblageFehler("Nextcloud lehnt die Anmeldung ab — neu verbinden (bib nas verbinden).")
         return r
@@ -144,8 +155,15 @@ class WebDAV:
     def ablegen(self, quelle: Path, rel: str) -> str:
         """Datei hochladen, gibt das neue ETag zurück."""
         self.mkdirs(str(PurePosixPath(rel).parent))
-        with quelle.open("rb") as fh:
-            r = self._req("PUT", rel, data=fh, headers={"Content-Type": "application/octet-stream"})
+        for versuch in range(4):
+            try:
+                with quelle.open("rb") as fh:   # bei jedem Versuch neu öffnen
+                    r = self._req("PUT", rel, data=fh, headers={"Content-Type": "application/octet-stream"})
+                break
+            except NichtErreichbar:
+                if versuch == 3:
+                    raise
+                time.sleep(2 ** versuch)
         if r.status_code not in (200, 201, 204):
             raise AblageFehler(f"PUT {rel}: HTTP {r.status_code}")
         etag = (r.headers.get("OC-ETag") or r.headers.get("ETag") or "").strip('"')

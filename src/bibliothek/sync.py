@@ -125,9 +125,11 @@ def abgleichen(lib: Library, *, dav=None, eingang: bool = True, fortschritt: For
             try:
                 _hochladen(lib, dav, z, key, remote.get(key), bericht, fortschritt)
             except ablage.NichtErreichbar:
+                z.speichern()
                 raise
             except Exception as exc:   # ein kaputter Titel soll den Rest nicht aufhalten
                 bericht["fehler"].append(f"{key}: {exc}")
+            z.speichern()              # Fortschritt sichern — ein Abbruch kostet höchstens diesen Titel
         _herunterladen(lib, dav, z, bericht, fortschritt)
         z.zuletzt = time.time()
         z.speichern()
