@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}{{ item.short }}{% endblock %}
+{% block content %}
+{% set sz = item.seitenzaehlung or {} %}
+<p class="brotkrumen"><a href="{{ url_for('liste') }}">Titel</a> / <code>{{ item.citekey }}</code></p>
+<h1>{{ item.title }}</h1>
+<p class="untertitel">{{ item.short }} · <span class="typ">{{ item.eintrag }}</span> · aufgenommen {{ item.hinzugefuegt }}</p>
+
+{% if item.unvollstaendig %}
+  <p class="meldung fehler">Es fehlen Angaben: <strong>{{ item.unvollstaendig|join(', ') }}</strong>. Bitte aus dem Impressum ergänzen — nicht schätzen.</p>
+{% endif %}
+{% for h in item.text.get('hinweise') or [] %}
+  <p class="meldung hinweis">{{ h }}</p>
+{% endfor %}
+
+<nav class="abschnitte">
+  <a href="#text">Text &amp; Dateien</a>
+  <a href="#seiten">Seitenzählung</a>
+  <a href="#metadaten">Metadaten</a>
+  <a href="#verwaltung">Verwaltung</a>
+</nav>
+
+<section id="text" class="karte">
+  <h2>Text &amp; Dateien</h2>
+  <ul class="dateien">
+    {% if seitenzahl %}
+      <li><a class="knopf" href="{{ url_for('text', key=item.citekey) }}">Text lesen</a>
+        <span class="leise">{{ seitenzahl }} {{ 'Abschnitte' if sz.get('status') == 'keine' else 'Seiten' }} · Quelle: {{ item.text.get('quelle') }}{% if item.text.get('konfidenz') %} · OCR-Konfidenz Ø {{ item.text.get('konfidenz') }}{% endif %}</span></li>
+    {% else %}
+      <li class="leise">Kein Text vorhanden.</li>
+    {% endif %}
+    {% for d in item.dateien %}
+      <li>{{ d }} — <a href="{{ url_for('datei', key=item.citekey, name=d) }}" target="_blank" rel="noopener">öffnen</a> · <a href="{{ url_for('datei', key=item.citekey, name=d, laden=1) }}">herunterladen</a></li>
+    {% endfor %}
+    {% if review %}
+      <li><a href="{{ url_for('ocr_datei', key=item.citekey, name='review.html') }}" target="_blank" rel="noopener">OCR-Prüfansicht</a> <span class="leise">Scans, Seitentrennung, unsichere Seiten</span></li>
+    {% endif %}
+    {% if item.text.get('ocr_ordner') %}
+      <li class="leise">OCR-Ordner: <code>{{ item.text.get('ocr_ordner') }}</code></li>
+    {% endif %}
+  </ul>
+  {% for d in item.dateien if d.lower().endswith('.pdf') %}{% if loop.first %}
+  <form method="post" action="{{ url_for('neu_erkennen', key=item.citekey) }}" class="inline" data-bestaetigen="Alle Seiten neu per OCR erkennen? Das kann dauern und ersetzt den vorhandenen Text.">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="zweitrangig">PDF neu per OCR erkennen</button>
+  </form>
+  {% endif %}{% endfor %}
+</section>
+
+<section id="seiten" class="karte">
+  <h2>Seitenzählung <span class="status status-{{ sz.get('status') }}">{{ STATUS_TEXT.get(sz.get('status'), sz.get('status')) }}</span></h2>
+  {% if sz.get('status') == 'keine' %}
+    <p class="leise">Dieses Format hat keine festen Seiten; Fundstellen werden als Abschnitte angegeben.</p>
+  {% else %}
+  <p class="erklaerung">Damit Zitate stimmen, muss klar sein, welche <em>gedruckte</em> Seite zu welcher Scan-Seite gehört.
+    Fehlen Scans oder sind Seiten doppelt, springt die Zählung — deshalb gibt es Abschnitte mit eigenem Versatz.
+    Ungeprüfte Abschnitte erscheinen in Fundstellen mit „?“.
+    {% if sz.get('schaetzung') %}<br>Schätzung: {{ sz.get('schaetzung') }}.{% endif %}</p>
+
+  {% for sprung in sz.get('spruenge') or [] %}
+    <p class="meldung warnung-gross" role="alert">⚠ {{ sprung }}</p>
+  {% endfor %}
+
+  {% if abschnitte %}
+  <table class="abschnitte-tabelle">
+    <thead><tr><th>Scan</th><th>Druckseite</th><th></th><th>Gegenprobe: erste / letzte Textzeile</th><th></th></tr></thead>
+    <tbody>
+    {% for a in abschnitte %}
+      <tr class="{{ 'geprueft' if a.geprueft else 'geschaetzt' }}" data-ab="{{ a.ab_scan }}" data-bis="{{ a.bis_scan }}">
+        <td class="nowrap">{{ a.ab_scan }}–{{ a.bis_scan }}</td>
+        <td class="nowrap">Scan {{ '%+d'|format(a.versatz) }}</td>
+        <td>{% if a.geprueft %}<span class="status status-bestätigt">geprüft</span>{% else %}<span class="status status-automatisch">geschätzt</span>{% endif %}</td>
+        <td>
+          {% for b in a.beispiele %}
+            <div class="beispiel">
+              <a href="{{ url_for('text', key=item.citekey, scan=b.scan) }}#scan-{{ b.scan }}">Scan {{ b.scan }}</a>
+              → <strong>{{ b.ref }}</strong>
+              <span class="zeilen"><span>oben: {{ b.zeilen[0]|truncate(60) }}</span><span>unten: {{ b.zeilen[1]|truncate(60) }}</span></span>
+            </div>
+          {% else %}
+            <span class="leise">keine Seiten mit Text</span>
+          {% endfor %}
+        </td>
+        <td class="aktionen">
+          {% if not a.geprueft %}
+          <form method="post" action="{{ url_for('seitenzaehlung', key=item.citekey) }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="aktion" value="abschnitt_bestaetigen">
+            <input type="hidden" name="ab_scan" value="{{ a.ab_scan }}">
+            <button type="submit" class="zweitrangig">Abschnitt bestätigen</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('seitenzaehlung', key=item.citekey) }}" data-bestaetigen="Abschnitt ab Scan {{ a.ab_scan }} löschen? Seine Seiten gehören dann zum vorigen Abschnitt.">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="aktion" value="abschnitt_loeschen">
+            <input type="hidden" name="ab_scan" value="{{ a.ab_scan }}">
+            <button type="submit" class="gefaehrlich klein">Abschnitt löschen</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif beispiele %}
+    <p class="leise">Noch keine Zuordnung. Diese Seiten helfen beim Ablesen der Druckseite:</p>
+    <table class="vorschau">
+      <thead><tr><th>Scan</th><th>erste / letzte Textzeile</th></tr></thead>
+      <tbody>
+      {% for p in beispiele %}
+        {% set zeilen = p.text.strip().splitlines() %}
+        <tr><td><a href="{{ url_for('text', key=item.citekey, scan=p.scan) }}#scan-{{ p.scan }}">{{ p.scan }}</a></td>
+          <td class="zeilen"><span>{{ (zeilen[0] if zeilen else '')|truncate(70) }}</span><span>{{ (zeilen[-1] if zeilen else '')|truncate(70) }}</span></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if sz.get('ausnahmen') %}
+    <p class="leise">Ausnahmen: {% for scan, label in sz.get('ausnahmen').items() %}Scan {{ scan }} = „{{ label or '—' }}“{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('seitenzaehlung', key=item.citekey) }}" class="seitenform" data-seitenhelfer>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="aktion" value="setzen">
+    <fieldset class="helfer">
+      <legend>Druckseite ablesen und festlegen</legend>
+      <div class="reihe">
+        <label class="feld schmal"><span>Scan</span><input type="number" name="scan" min="1" required data-helfer-scan></label>
+        <label class="feld schmal"><span>zeigt Druckseite</span><input type="number" name="druckseite" required data-helfer-seite></label>
+        <label class="feld schmal"><span>neuer Abschnitt ab Scan (optional)</span><input type="number" name="ab_scan" min="1" data-helfer-ab></label>
+        <div class="knoepfe"><button type="submit">Abschnitt bestätigen</button></div>
+      </div>
+      <p class="leise" data-helfer-vorschau>Gilt für den Abschnitt, in dem der Scan liegt, und markiert ihn als geprüft.</p>
+    </fieldset>
+  </form>
+  {% if abschnitte or sz.get('status') == 'pdf' %}
+  <form method="post" action="{{ url_for('seitenzaehlung', key=item.citekey) }}" class="inline" data-bestaetigen="Alle Abschnitte als geprüft markieren? Nur tun, wenn die Gegenproben oben stimmen.">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="aktion" value="alles">
+    <button type="submit" class="zweitrangig" {{ 'disabled' if sz.get('status') == 'bestätigt' }}>Alles bestätigen</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section id="metadaten" class="karte">
+  <h2>Metadaten</h2>
+  <form method="post" action="{{ url_for('metadaten', key=item.citekey) }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld schmal"><span>Eintragstyp (BibLaTeX)</span>
+      <input name="eintrag" value="{{ item.eintrag }}" list="typen" required></label>
+    <datalist id="typen">{% for t in typen %}<option value="{{ t }}">{% endfor %}</datalist>
+
+    <div class="felder" data-felder>
+      {% for name, wert in item.felder.items() %}
+        <div class="feldzeile">
+          <input name="feld_name" value="{{ name }}" aria-label="Feldname" class="feldname">
+          <textarea name="feld_wert" rows="{{ 1 if wert|length < 80 and '\n' not in wert else 3 }}" aria-label="Wert von {{ name }}">{{ wert }}</textarea>
+        </div>
+      {% endfor %}
+      {% for pf in ['author', 'title', 'year'] if pf not in item.felder %}
+        <div class="feldzeile fehlt">
+          <input name="feld_name" value="{{ pf }}" class="feldname" aria-label="Feldname">
+          <textarea name="feld_wert" rows="1" placeholder="fehlt — aus dem Impressum ergänzen" aria-label="Wert von {{ pf }}"></textarea>
+        </div>
+      {% endfor %}
+    </div>
+    <template data-feldvorlage>
+      <div class="feldzeile">
+        <input name="feld_name" placeholder="feldname, z. B. publisher" class="feldname" aria-label="Feldname">
+        <textarea name="feld_wert" rows="1" aria-label="Wert"></textarea>
+      </div>
+    </template>
+    <p><button type="button" class="zweitrangig" data-feld-hinzu>+ Feld</button>
+      <span class="leise">Leere Felder werden entfernt. Werte bleiben wörtlich (LaTeX erlaubt).</span></p>
+
+    <div class="reihe">
+      <label class="feld"><span>Tags (Komma)</span><input name="tags" value="{{ item.tags|join(', ') }}"></label>
+      <label class="feld"><span>Kategorien (z. B. AT/Jona)</span><input name="kategorien" value="{{ item.kategorien|join(', ') }}"></label>
+      <label class="feld"><span>Projekte</span><input name="projekte" value="{{ item.projekte|join(', ') }}"></label>
+    </div>
+    <label class="feld"><span>Notiz</span><textarea name="notiz" rows="3">{{ item.notiz }}</textarea></label>
+    {% if item.kommentar %}
+      <details><summary>BibTeX-Kommentar (Prüfvermerke)</summary><pre class="kommentar">{{ item.kommentar }}</pre></details>
+    {% endif %}
+    {% if item.herkunft %}<p class="leise">Herkunft: {{ item.herkunft }}</p>{% endif %}
+    <div class="knoepfe"><button type="submit">Metadaten speichern</button></div>
+  </form>
+</section>
+
+<section id="verwaltung" class="karte">
+  <h2>Verwaltung</h2>
+  <form method="post" action="{{ url_for('umbenennen', key=item.citekey) }}" class="reihe">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>Zitierschlüssel ändern</span><input name="citekey" value="{{ item.citekey }}" required pattern="[A-Za-z0-9_\-:.]+"></label>
+    <div class="knoepfe"><button type="submit" class="zweitrangig">Umbenennen</button></div>
+  </form>
+  <form method="post" action="{{ url_for('loeschen', key=item.citekey) }}" class="reihe gefahr">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>Zum Löschen <code>{{ item.citekey }}</code> eintippen</span><input name="bestaetigung" autocomplete="off"></label>
+    <div class="knoepfe"><button type="submit" class="gefaehrlich">Titel löschen</button></div>
+  </form>
+  <p class="leise">Löschen entfernt den Ordner mit Originaldatei und Text. Ein externer OCR-Ordner bleibt erhalten.</p>
+</section>
+{% endblock %}

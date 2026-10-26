@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ code or 'Hinweis' }}{% endblock %}
+{% block content %}
+<div class="leer">
+  {% if code %}<h1>Fehler {{ code }}</h1>{% endif %}
+  <p>{{ meldung }}</p>
+  {% if code %}<p><a href="{{ url_for('liste') }}">Zur Übersicht</a></p>{% endif %}
+</div>
+{% endblock %}

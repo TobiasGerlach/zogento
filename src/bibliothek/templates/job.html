@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ job.titel }}{% endblock %}
+{% block content %}
+<p class="brotkrumen"><a href="{{ url_for('jobs_seite') }}">Jobs</a> / {{ job.id }}</p>
+<h1>{{ job.titel }}</h1>
+<div class="karte" data-job="{{ url_for('api_job', job_id=job.id) }}" data-titel-url="{{ url_for('titel', key='__KEY__') }}">
+  <p>Status: <span class="jobstatus jobstatus-{{ job.status }}" data-job-status>{{ job.status }}</span></p>
+  <p class="meldung fehler" data-job-fehler {{ 'hidden' if not job.fehler }}>{{ job.fehler }}</p>
+  <div data-job-ergebnis></div>
+  <details open><summary>Protokoll</summary>
+    <pre class="protokoll" data-job-log>{{ job.log|join('\n') }}</pre>
+  </details>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<h1>Jobs</h1>
+{% if not jobs %}
+  <p class="leer">Keine Jobs seit dem Start.</p>
+{% else %}
+<table class="titelliste" data-jobliste>
+  <thead><tr><th>Job</th><th>Status</th><th>Zeit</th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td><a href="{{ url_for('job_seite', job_id=j.id) }}">{{ j.titel }}</a></td>
+      <td><span class="jobstatus jobstatus-{{ j.status }}">{{ j.status }}</span></td>
+      <td class="leise">{{ j.begonnen }}{% if j.beendet %} – {{ j.beendet }}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

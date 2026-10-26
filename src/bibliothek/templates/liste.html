@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Titel{% endblock %}
+{% block content %}
+<div class="spalten">
+  <aside class="filter">
+    <form method="get" action="{{ url_for('liste') }}">
+      <label class="feld">
+        <span>Titel, Autor, Schlüssel</span>
+        <input type="search" name="q" value="{{ f.q }}">
+      </label>
+      {% for name, label, werte in [('tag', 'Tag', facets.tags), ('kategorie', 'Kategorie', facets.kategorien), ('projekt', 'Projekt', facets.projekte), ('typ', 'Typ', facets.typen)] %}
+        {% if werte %}
+        <label class="feld">
+          <span>{{ label }}</span>
+          <select name="{{ name }}">
+            <option value="">alle</option>
+            {% for wert, anzahl in werte %}
+              <option value="{{ wert }}" {{ 'selected' if f[name] == wert }}>{{ wert }} ({{ anzahl }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% endif %}
+      {% endfor %}
+      <label class="haken"><input type="checkbox" name="unvollstaendig" value="1" {{ 'checked' if f.unvollstaendig }}> nur mit fehlenden Angaben</label>
+      <div class="knoepfe">
+        <button type="submit">Filtern</button>
+        <a href="{{ url_for('liste') }}" class="leise">zurücksetzen</a>
+      </div>
+    </form>
+  </aside>
+
+  <section class="inhalt">
+    <h1>Titel <span class="leise">{{ items|length }}{% if items|length != gesamt %} von {{ gesamt }}{% endif %}</span></h1>
+    {% if not gesamt %}
+      <div class="leer">
+        <p>Die Bibliothek ist noch leer.</p>
+        <p><a class="knopf" href="{{ url_for('aufnehmen') }}">Ersten Titel aufnehmen</a></p>
+      </div>
+    {% elif not items %}
+      <p class="leer">Kein Titel passt zu diesem Filter.</p>
+    {% else %}
+    <table class="titelliste">
+      <thead>
+        <tr><th>Autor · Jahr</th><th>Titel</th><th>Seiten</th><th>Text</th></tr>
+      </thead>
+      <tbody>
+      {% for it in items %}
+        <tr>
+          <td class="wer"><a href="{{ url_for('titel', key=it.citekey) }}">{{ it.short }}</a><div class="schluessel">{{ it.citekey }}</div></td>
+          <td>
+            <a href="{{ url_for('titel', key=it.citekey) }}">{{ it.title }}</a>
+            <div class="marken">
+              <span class="typ">{{ it.eintrag }}</span>
+              {% for t in it.tags %}<a class="tag" href="{{ url_for('liste', tag=t) }}">{{ t }}</a>{% endfor %}
+              {% for p in it.projekte %}<a class="projekt" href="{{ url_for('liste', projekt=p) }}">{{ p }}</a>{% endfor %}
+              {% if it.unvollstaendig %}<span class="warnung" title="Fehlt: {{ it.unvollstaendig|join(', ') }}">Angaben fehlen</span>{% endif %}
+            </div>
+          </td>
+          {% set st = (it.seitenzaehlung or {}).get('status') %}
+          <td><span class="status status-{{ st }}">{{ STATUS_TEXT.get(st, st) }}</span></td>
+          <td class="leise">{{ it.text.get('quelle') or '—' }}{% if it.text.get('seiten') %} · {{ it.text.get('seiten') }}{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

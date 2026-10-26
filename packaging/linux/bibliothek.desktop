@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Bibliothek
+GenericName=Literaturverwaltung
+Comment=Literatur verwalten, OCR, Volltext- und semantische Suche
+Exec=/opt/bibliothek/Bibliothek
+Icon=bibliothek
+Terminal=false
+Categories=Office;Education;Literature;
+Keywords=Literatur;PDF;OCR;BibTeX;Zitat;
+StartupNotify=true

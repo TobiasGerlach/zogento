@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+<h1>Einstellungen</h1>
+
+<section class="karte">
+  <h2>Allgemein</h2>
+  <form method="post" action="{{ url_for('einstellungen_speichern') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>Bibliotheksordner (gilt nach Neustart)</span>
+      <input name="bibliothek" value="{{ settings.get('bibliothek') or root }}"></label>
+    <label class="feld schmal"><span>OCR-Sprachen (Tesseract-Codes)</span>
+      <input name="ocr_sprache" value="{{ sprache }}" placeholder="eng+deu"></label>
+    <p class="leise">Gespeichert in <code>{{ settings_file }}</code>. Für Fraktur zusätzlich <code>deu_latf</code>, für Griechisch <code>grc</code>, Hebräisch <code>heb</code> (nur Tesseract).</p>
+    <div class="knoepfe"><button type="submit">Speichern</button></div>
+  </form>
+</section>
+
+<section class="karte">
+  <h2>Kommandozeile <code>bib</code></h2>
+  <p>Mit <code>bib</code> durchsuchen Claude und andere KI-Werkzeuge die Bibliothek, z. B. <code>bib suche "Ironie Jona"</code> oder <code>bib zeige feestuart2015effektives --seiten 45-47</code>.</p>
+  {% if windows %}
+    <p class="leise">Unter Windows richtet der Installer <code>bib</code> im PATH ein.</p>
+  {% else %}
+    <p class="leise">{% if bib %}Gefunden: <code>{{ bib }}</code>{% else %}Das Programm <code>bib</code> wurde nicht gefunden.{% endif %}
+      {% if not on_path %} · <code>~/.local/bin</code> steht nicht im PATH.{% endif %}</p>
+    <form method="post" action="{{ url_for('cli_einrichten') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="zweitrangig" {{ 'disabled' if not bib }}>In ~/.local/bin einrichten</button>
+    </form>
+  {% endif %}
+</section>
+
+<section class="karte">
+  <h2>Suchindex</h2>
+  <p>{{ stats.get('titel', 0) }} Titel · {{ stats.get('abschnitte', 0) }} Abschnitte · {{ stats.get('embeddings', 0) }} mit Embeddings</p>
+  <p class="leise">Der Index wird aus den Titelordnern abgeleitet und kann jederzeit neu aufgebaut werden. Embeddings brauchen beim ersten Mal das Modell (≈1,2 GB Download).</p>
+  <div class="reihe">
+    <form method="post" action="{{ url_for('embeddings') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Fehlende Embeddings berechnen</button></form>
+    <form method="post" action="{{ url_for('index_neu') }}" data-bestaetigen="Index komplett neu aufbauen? Die Embeddings werden danach neu berechnet."><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Index neu aufbauen</button></form>
+  </div>
+</section>
+
+<section class="karte">
+  <h2>Programm</h2>
+  <p class="leise">Version {{ version }} · Bibliothek: <code>{{ root }}</code></p>
+  <form method="post" action="{{ url_for('beenden') }}" data-bestaetigen="Bibliothek beenden?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="gefaehrlich">Beenden</button>
+  </form>
+</section>
+{% endblock %}

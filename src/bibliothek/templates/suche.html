@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Suche{% endblock %}
+{% block content %}
+<h1>Suche</h1>
+<form method="get" action="{{ url_for('suche') }}" class="suchform">
+  <input type="search" name="q" value="{{ args.get('q', '') }}" placeholder="Begriff, Phrase in &quot;…&quot; oder Frage" autofocus aria-label="Suchanfrage">
+  <div class="reihe">
+    <label class="feld"><span>Art</span>
+      <select name="modus">
+        {% for wert, label in [('hybrid', 'Wörter + Bedeutung'), ('text', 'nur Wörter'), ('semantisch', 'nur Bedeutung')] %}
+          <option value="{{ wert }}" {{ 'selected' if args.get('modus', 'hybrid') == wert }}>{{ label }}</option>
+        {% endfor %}
+      </select></label>
+    {% for name, label, werte in [('tag', 'Tag', facets.tags), ('kategorie', 'Kategorie', facets.kategorien), ('projekt', 'Projekt', facets.projekte)] %}
+      {% if werte %}
+      <label class="feld"><span>{{ label }}</span>
+        <select name="{{ name }}">
+          <option value="">alle</option>
+          {% for w in werte %}<option value="{{ w }}" {{ 'selected' if args.get(name) == w }}>{{ w }}</option>{% endfor %}
+        </select></label>
+      {% endif %}
+    {% endfor %}
+    <div class="knoepfe"><button type="submit">Suchen</button></div>
+  </div>
+</form>
+
+{% if hinweis %}<p class="meldung hinweis">{{ hinweis }}</p>{% endif %}
+
+{% if args.get('q') %}
+  {% if not treffer %}
+    <p class="leer">Nichts gefunden.</p>
+  {% else %}
+  <ol class="treffer">
+    {% for t in treffer %}
+      <li>
+        <div class="trefferkopf">
+          <a href="{{ url_for('titel', key=t.citekey) }}"><strong>{{ t.kurz }}</strong></a>
+          <span class="leise">{{ t.titel|truncate(80) }}</span>
+        </div>
+        <div class="stelle">
+          <a href="{{ url_for('text', key=t.citekey, scan=t.scan) }}#scan-{{ t.scan }}" class="seitenangabe">{{ t.seite }}</a>
+          {% for w in t.wege %}<span class="weg">{{ w }}</span>{% endfor %}
+        </div>
+        <p class="snippet">{{ t.snippet|markiert }}</p>
+      </li>
+    {% endfor %}
+  </ol>
+  <p class="leise">Seitenangaben mit „?“ oder „Druckseite ungeklärt“ vor dem Zitieren am Scan prüfen.</p>
+  {% endif %}
+{% else %}
+  <div class="erklaerung">
+    <p><strong>Wörter</strong> findet Begriffe auch in gebeugter Form (Gattung → Gattungen). Phrasen in Anführungszeichen, <code>OR</code> und <code>NOT</code> sind möglich.</p>
+    <p><strong>Bedeutung</strong> findet Stellen, die dasselbe meinen, auch in anderer Sprache — z. B. „Ironie im Jonabuch“ findet englische Aufsätze über „satire in Jonah“.</p>
+  </div>
+{% endif %}
+{% endblock %}

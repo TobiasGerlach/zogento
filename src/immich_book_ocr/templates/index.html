@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <meta name="color-scheme" content="light">
+    <title>Folio · Book scans to text</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <a class="brand" href="/" aria-label="Folio home"><span class="brand-icon" aria-hidden="true">f.</span> folio</a>
+        <span class="local-badge"><span></span> Runs on your computer</span>
+      </header>
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">YOUR BOOKS, IN WORDS</p>
+            <h1 id="page-title">From bookshelf<br>to text.</h1>
+            <p class="lede">Turn an Immich album of book scans into a readable, searchable text document. Every spread, in order.</p>
+          </div>
+          <div class="book-art" aria-hidden="true">
+            <div class="book-sheet left-sheet"><i></i><i></i><i></i><i></i><i></i><i></i><small>12</small></div>
+            <div class="book-sheet right-sheet"><i></i><i></i><i></i><i></i><i></i><i></i><small>13</small></div>
+            <span class="scan-line"></span>
+            <span class="art-label">Two pages. One clear text.</span>
+          </div>
+        </section>
+
+        <section class="workspace" aria-label="Digitize a book">
+          <form id="album-form" class="input-panel">
+            <div class="section-heading"><span class="step">01</span><h2>Add your album</h2></div>
+            <label for="album-url">Immich album link</label>
+            <input id="album-url" name="url" type="url" placeholder="https://photos.example.com/share/…" required autocomplete="off" spellcheck="false">
+            <p class="field-note">Use a shared link, or an album link with an API key.</p>
+            <div class="two-columns">
+              <div>
+                <label for="language">Book language</label>
+                <input id="language" name="language" value="eng+deu" list="languages" required autocomplete="off" spellcheck="false">
+                <datalist id="languages"><option value="eng+deu">English + German</option><option value="eng">English</option><option value="deu">German</option><option value="fra">French</option><option value="spa">Spanish</option></datalist>
+                <p class="field-note">English and German are recognized together by default.</p>
+              </div>
+              <div>
+                <label for="scan-order">Scan order</label>
+                <select id="scan-order" name="order"><option value="date" selected>Capture date</option><option value="filename">Filename (1, 2, 10…)</option><option value="album">Album order</option></select>
+              </div>
+            </div>
+            <details class="options">
+              <summary>Access &amp; page options <span aria-hidden="true">+</span></summary>
+              <div class="options-body">
+                <label for="share-password">Share password <span class="optional">optional</span></label>
+                <input id="share-password" name="password" type="password" autocomplete="off">
+                <label for="api-key">Immich API key <span class="optional">for private albums</span></label>
+                <input id="api-key" name="api_key" type="password" autocomplete="off" spellcheck="false">
+                <p class="field-note">Credentials are used for this job and are not saved.</p>
+                <label for="ocr-engine">OCR engine</label>
+                <select id="ocr-engine" name="engine"><option value="auto">Automatic (Apple Vision when available)</option><option value="vision">Apple Vision</option><option value="tesseract">Tesseract</option></select>
+                <p class="field-note">Apple Vision handles tilted or sideways photos and is several times faster. Tesseract supports more languages, including Fraktur.</p>
+                <label for="page-rotation">Page rotation</label>
+                <select id="page-rotation" name="rotation"><option value="auto">Detect automatically</option><option value="none">Leave as photographed</option><option value="90">Rotate 90° left</option><option value="180">Rotate 180°</option><option value="270">Rotate 90° right</option></select>
+                <p class="field-note">Spreads must be upright before they can be split down the binding.</p>
+                <label for="reading-order">Page reading direction</label>
+                <select id="reading-order" name="reading_order"><option value="ltr">Left page, then right page</option><option value="rtl">Right page, then left page</option></select>
+                <label class="check-label"><input type="checkbox" id="single-page" name="single_page"> Each image is a single page</label>
+                <label class="check-label"><input type="checkbox" id="crop-paper" name="crop_paper" checked> Trim a dark background around the book</label>
+              </div>
+            </details>
+            <p id="form-error" class="error-message" role="alert" hidden></p>
+            <button id="start-button" class="button primary" type="submit">Digitize book <span aria-hidden="true">↗</span></button>
+            <p class="privacy-note">OCR runs locally. Large albums can take a while.</p>
+          </form>
+
+          <section id="job-panel" class="job-panel" aria-labelledby="job-heading">
+            <div class="section-heading"><span class="step">02</span><h2 id="job-heading">Your text, ready to keep</h2></div>
+            <div id="empty-state" class="empty-state">
+              <div class="document-icon" aria-hidden="true"><b>Aa</b><i></i><i></i><i></i></div>
+              <h3>A new chapter for your scans.</h3>
+              <p>We download the images, find the page division in each spread, and recognize the text page by page.</p>
+              <div class="process-tags"><span>Auto page split</span><span>Local OCR</span><span>Plain text</span></div>
+            </div>
+            <div id="job-state" hidden>
+              <div class="status-row"><span id="status-badge" class="status-badge working">Working</span><span id="job-count" class="job-count"></span></div>
+              <h3 id="job-title">Opening your album…</h3>
+              <p id="job-message" class="job-message" role="status" aria-live="polite">Preparing your book.</p>
+              <div id="activity" class="activity" aria-hidden="true"><span></span></div>
+              <p id="job-error" class="error-message" role="alert" hidden></p>
+              <div id="result-actions" hidden>
+                <a id="download-link" class="button primary" download="book.txt">Download book.txt <span aria-hidden="true">↓</span></a>
+                <p id="result-note" class="field-note"></p>
+              </div>
+              <ul id="warnings" class="warnings" hidden></ul>
+              <details class="progress-details"><summary>Processing log</summary><ol id="event-log" class="event-log"></ol></details>
+            </div>
+          </section>
+        </section>
+
+        <section id="review-section" class="review-section" hidden aria-labelledby="review-heading">
+          <div class="review-header">
+            <div><p class="eyebrow">A LITTLE PROOFREADING GOES A LONG WAY</p><h2 id="review-heading">Review your page splits</h2><p id="review-help">Check the division for each spread. Move a split if needed, then rebuild the text from your saved scans.</p></div>
+            <button id="rerun-button" class="button secondary" type="button">Rebuild text</button>
+          </div>
+          <p id="review-error" class="error-message" role="alert" hidden></p>
+          <div id="scan-grid" class="scan-grid"></div>
+        </section>
+      </main>
+      <footer><span>Folio · A quieter way to digitize your library.</span><span>Immich → pages → text</span></footer>
+    </div>
+  </body>
+</html>

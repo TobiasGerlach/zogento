@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Aufnehmen{% endblock %}
+{% block content %}
+<h1>Aufnehmen</h1>
+<p class="erklaerung">Autor, Titel und Jahr sind optional. Fehlt etwas, wird der Titel als „Angaben fehlen“ markiert — ergänzen kannst du es später. Nichts wird geraten.</p>
+
+{% macro angaben(einzeln=true) %}
+  <details class="angaben">
+    <summary>Angaben &amp; Einordnung (optional)</summary>
+    {% if einzeln %}
+    <div class="reihe">
+      <label class="feld"><span>Autor (Nachname, Vorname and …)</span><input name="author"></label>
+      <label class="feld"><span>Titel</span><input name="title"></label>
+      <label class="feld schmal"><span>Jahr</span><input name="year" inputmode="numeric"></label>
+    </div>
+    {% endif %}
+    <div class="reihe">
+      <label class="feld schmal"><span>Typ</span><input name="eintrag" list="typen-aufnahme" placeholder="automatisch"></label>
+      <label class="feld"><span>Tags</span><input name="tags" placeholder="Komma-getrennt"></label>
+      <label class="feld"><span>Kategorien</span><input name="kategorien" placeholder="z. B. AT/Jona"></label>
+      <label class="feld"><span>Projekte</span><input name="projekte" placeholder="z. B. Hermeneutik, Buch1"></label>
+    </div>
+    <label class="haken"><input type="checkbox" name="doppelt" value="1"> auch aufnehmen, wenn es den Titel schon gibt</label>
+  </details>
+{% endmacro %}
+<datalist id="typen-aufnahme">{% for t in typen %}<option value="{{ t }}">{% endfor %}</datalist>
+
+<section class="karte">
+  <h2>Dateien</h2>
+  <p class="leise">PDF, Word (.docx/.doc), OpenDocument, RTF, EPUB, HTML, PowerPoint, Text/Markdown, Bilder. PDFs ohne Textebene und Bilder werden per OCR erkannt.</p>
+  <form method="post" action="{{ url_for('aufnehmen_dateien') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="ablage" data-ablage>
+      <input type="file" name="dateien" multiple required>
+      <span data-ablage-text>Dateien hierher ziehen oder klicken</span>
+    </label>
+    {{ angaben(true) }}
+    <label class="haken"><input type="checkbox" name="ohne_ocr" value="1"> ohne OCR (schneller, Scanseiten bleiben leer)</label>
+    <div class="knoepfe"><button type="submit">Aufnehmen</button></div>
+  </form>
+</section>
+
+<section class="karte">
+  <h2>Buch scannen (OCR)</h2>
+  <p class="leise">Ordner mit Fotos oder Scans eines Buches, oder ein Immich-Freigabelink. Doppelseiten werden automatisch getrennt; das Ergebnis lässt sich in der OCR-Prüfansicht kontrollieren.</p>
+  <form method="post" action="{{ url_for('aufnehmen_scans') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>Ordner oder Immich-Link</span>
+      <input name="quelle" required placeholder="/Users/…/Scans/Buch   oder   https://photos…/share/…"></label>
+    <div class="reihe">
+      <label class="haken"><input type="checkbox" name="einzelseiten" value="1"> jedes Bild ist eine einzelne Seite (keine Doppelseiten)</label>
+      <label class="feld schmal"><span>Reihenfolge</span>
+        <select name="reihenfolge"><option value="filename">nach Dateiname</option><option value="date">nach Aufnahmedatum</option></select></label>
+    </div>
+    {{ angaben(true) }}
+    <div class="knoepfe"><button type="submit">OCR starten</button></div>
+  </form>
+</section>
+
+<section class="karte">
+  <h2>Vorhandenes OCR-Ergebnis übernehmen</h2>
+  <p class="leise">Ein Ausgabeordner des Buch-OCR (mit <code>report.json</code>). Der Ordner bleibt, wo er ist; die Bibliothek verweist darauf.</p>
+  <form method="post" action="{{ url_for('aufnehmen_ocr_ordner') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>OCR-Ausgabeordner</span><input name="ordner" required></label>
+    {{ angaben(true) }}
+    <div class="knoepfe"><button type="submit">Übernehmen</button></div>
+  </form>
+</section>
+{% endblock %}

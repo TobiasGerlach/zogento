@@ -1,0 +1,92 @@
+name: App-Pakete
+
+# Baut Bibliothek für macOS (.dmg), Ubuntu (.deb) und Windows (Setup.exe).
+# Bei einem Tag v* entsteht zusätzlich ein GitHub-Release mit allen drei Paketen.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pakete-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (arm64)
+            os: macos-14
+            paket: dist/*.dmg
+          - name: Ubuntu
+            os: ubuntu-22.04
+            paket: dist/*.deb
+          - name: Windows
+            os: windows-latest
+            paket: dist/*-setup.exe
+    env:
+      UV_PYTHON_PREFERENCE: only-system
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Version aus dem Tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: echo "BIBLIOTHEK_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Systempakete (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng
+
+      - name: Tesseract (Windows)
+        if: runner.os == 'Windows'
+        run: choco install tesseract -y --no-progress
+
+      - name: Bauen (macOS, Ubuntu)
+        if: runner.os != 'Windows'
+        run: packaging/build.sh
+
+      - name: Bauen (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: packaging/build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bibliothek-${{ runner.os }}
+          path: ${{ matrix.paket }}
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: pakete
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: pakete/*
+          generate_release_notes: true

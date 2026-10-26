@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Text · {{ item.short }}{% endblock %}
+{% block content %}
+<p class="brotkrumen"><a href="{{ url_for('liste') }}">Titel</a> / <a href="{{ url_for('titel', key=item.citekey) }}">{{ item.citekey }}</a> / Text</p>
+<h1>{{ item.title }}</h1>
+{% set st = (item.seitenzaehlung or {}).get('status') %}
+<p class="untertitel">{{ item.short }} · Seitenzählung: <span class="status status-{{ st }}">{{ STATUS_TEXT.get(st, st) }}</span>
+  {% if st in ('automatisch', 'unbekannt') %} — <a href="{{ url_for('titel', key=item.citekey) }}#seiten">festlegen</a>{% endif %}</p>
+
+{% macro blaettern() %}
+<nav class="blaettern">
+  {% if start > 1 %}<a href="{{ url_for('text', key=item.citekey, ab=[1, start - schritt]|max) }}">← zurück</a>{% else %}<span></span>{% endif %}
+  <span class="leise">{{ start }}–{{ [start + schritt - 1, gesamt]|min }} von {{ gesamt }}</span>
+  {% if start + schritt <= gesamt %}<a href="{{ url_for('text', key=item.citekey, ab=start + schritt) }}">weiter →</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endmacro %}
+
+{{ blaettern() }}
+{% for p in pages %}
+  <article class="seite {{ 'ziel' if ziel == p.scan }}" id="scan-{{ p.scan }}">
+    <header><strong>{{ item.page_ref(p) }}</strong>{% if p.konfidenz is not none %} <span class="leise">OCR {{ p.konfidenz|round(0)|int }}</span>{% endif %}</header>
+    {% if p.text.strip() %}<div class="seitentext">{{ p.text }}</div>{% else %}<p class="leise">(kein Text auf dieser Seite)</p>{% endif %}
+  </article>
+{% endfor %}
+{{ blaettern() }}
+{% endblock %}

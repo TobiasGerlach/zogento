@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf" content="{{ csrf }}">
+  <title>{% block title %}Bibliothek{% endblock %} · Bibliothek</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <header class="kopf">
+    <a class="marke" href="{{ url_for('liste') }}">Bibliothek</a>
+    <nav>
+      <a href="{{ url_for('liste') }}" class="{{ 'aktiv' if request.endpoint in ('liste', 'titel', 'text') }}">Titel</a>
+      <a href="{{ url_for('suche') }}" class="{{ 'aktiv' if request.endpoint == 'suche' }}">Suche</a>
+      <a href="{{ url_for('aufnehmen') }}" class="{{ 'aktiv' if request.endpoint == 'aufnehmen' }}">Aufnehmen</a>
+      <a href="{{ url_for('jobs_seite') }}" class="{{ 'aktiv' if request.endpoint in ('jobs_seite', 'job_seite') }}">Jobs{% if aktive_jobs %} <span class="zahl" data-aktive-jobs>{{ aktive_jobs }}</span>{% endif %}</a>
+      <a href="{{ url_for('einstellungen') }}" class="{{ 'aktiv' if request.endpoint == 'einstellungen' }}">Einstellungen</a>
+    </nav>
+    <form class="schnellsuche" action="{{ url_for('suche') }}" method="get" role="search">
+      <input type="search" name="q" placeholder="In allen Texten suchen …" aria-label="Suche" value="{{ request.args.get('q', '') if request.endpoint == 'suche' else '' }}">
+    </form>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for kategorie, meldung in messages %}
+        <p class="meldung {{ kategorie }}" role="status">{{ meldung }}</p>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

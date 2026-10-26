@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bibliothek"
+version = "0.1.0"
+description = "Zentrale Literaturverwaltung mit OCR, Volltext- und semantischer Suche"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6",
+  "pypdfium2>=4.30",
+  "python-docx>=1.1",
+  "striprtf>=0.0.26",
+  "Flask>=3.1,<4",
+  "numpy>=1.26,<3",
+  "sentence-transformers>=3.0",
+  "transformers>=4.51",
+  "torch>=2.3",
+  # eingebautes Buch-OCR (immich_book_ocr)
+  "Pillow>=10.4,<13",
+  "opencv-python-headless>=4.10,<5",
+  "requests>=2.32,<3",
+  "pillow-heif>=0.21,<2",
+  "pyobjc-framework-Vision>=10.3; sys_platform == 'darwin'",
+  "pyobjc-framework-Quartz>=10.3; sys_platform == 'darwin'",
+  # natives Fenster (WKWebView / WebView2); unter Linux Browser-Fallback
+  "pywebview>=5.1; sys_platform != 'linux'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+build = ["pyinstaller>=6.10", "pyinstaller-hooks-contrib>=2025.1"]
+
+[project.scripts]
+bib = "bibliothek.cli:main"
+bibliothek = "bibliothek.app:main"
+book-ocr = "immich_book_ocr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bibliothek = ["templates/*.html", "static/*", "*.md"]
+immich_book_ocr = ["templates/*.html", "static/*"]
+
+# Unter Linux und Windows reicht Torch für die CPU (spart ~2 GB CUDA)
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
