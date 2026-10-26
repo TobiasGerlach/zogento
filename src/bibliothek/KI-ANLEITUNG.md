@@ -22,6 +22,10 @@ bib bibtex --aus-tex <pfad/zur/arbeit> -o <pfad>/references.bib
 Direkt lesen geht auch: `titel/<citekey>/text.md` (Seitenmarken `[[…]]`),
 `titel/<citekey>/meta.yaml`, `titel/<citekey>/notizen.md`.
 
+Originaldateien können auf der Nextcloud liegen statt im Ordner:
+`bib oeffne <citekey> --nur-pfad` holt sie und nennt den lokalen Pfad.
+Für Suchen und Lesen braucht es das nicht — Text und Seiten sind immer lokal.
+
 ## Seitenangaben — verbindlich
 
 | Ausgabe | Bedeutung | Zitierbar? |

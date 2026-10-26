@@ -30,13 +30,15 @@
       <li class="leise">Kein Text vorhanden.</li>
     {% endif %}
     {% for d in item.dateien %}
-      <li>{{ d }} — <a href="{{ url_for('datei', key=item.citekey, name=d) }}" target="_blank" rel="noopener">öffnen</a> · <a href="{{ url_for('datei', key=item.citekey, name=d, laden=1) }}">herunterladen</a></li>
+      <li>{{ d }} — <a href="{{ url_for('datei', key=item.citekey, name=d) }}" target="_blank" rel="noopener">öffnen</a> · <a href="{{ url_for('datei', key=item.citekey, name=d, laden=1) }}">herunterladen</a>
+        {% if nas %}<span class="leise">{{ 'noch nicht hochgeladen' if orte.get(d) == 'lokal' else 'auf der Nextcloud' }}</span>{% endif %}</li>
     {% endfor %}
     {% if review %}
       <li><a href="{{ url_for('ocr_datei', key=item.citekey, name='review.html') }}" target="_blank" rel="noopener">OCR-Prüfansicht</a> <span class="leise">Scans, Seitentrennung, unsichere Seiten</span></li>
     {% endif %}
     {% if item.text.get('ocr_ordner') %}
-      <li class="leise">OCR-Ordner: <code>{{ item.text.get('ocr_ordner') }}</code></li>
+      {% set ort = item.text.get('ocr_ordner') %}
+      <li class="leise">OCR-Ordner: {% if ort.startswith('nas:') %}auf der Nextcloud (<code>{{ ort[4:] }}</code>){% else %}<code>{{ ort }}</code>{% endif %}</li>
     {% endif %}
   </ul>
   {% for d in item.dateien if d.lower().endswith('.pdf') %}{% if loop.first %}

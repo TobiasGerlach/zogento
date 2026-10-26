@@ -2,7 +2,11 @@
 
 Seiten werden auf dem Server gerendert, Formulare sind gewöhnliche POSTs mit
 CSRF-Token. JavaScript gibt es nur für Komfort: Job-Fortschritt, Vorschau der
-Seitenzählung, Felder hinzufügen. Die JSON-API unter /api/ bedient die CLI.
+Seitenzählung, Felder hinzufügen, Schnell-Upload. Die JSON-API unter /api/
+bedient die CLI.
+
+Mit verbundener Nextcloud gleicht die App beim Start, alle fünf Minuten und
+kurz nach jeder Änderung ab (auto_sync, nur in der laufenden App).
 """
 from __future__ import annotations
 
@@ -12,16 +16,18 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
+import time
+import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from flask import (Flask, abort, flash, jsonify, redirect, render_template, request, send_from_directory, session,
-                   url_for)
+from flask import (Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for)
 from markupsafe import Markup, escape
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
-from . import config, index, ingest, pagenums
+from . import ablage, config, dateien, extract, index, ingest, pagenums, sync
 from .jobs import JobRunner
 from .store import (STATUS_AUTO, STATUS_BESTAETIGT, STATUS_KEINE, STATUS_PDF, STATUS_UNBEKANNT, Item, Library,
                     Page)
@@ -38,6 +44,9 @@ EINTRAGSTYPEN = ["book", "article", "incollection", "inbook", "collection", "onl
 PFLICHT = ("author", "title", "year")
 FIELD_NAME = re.compile(r"^[a-z][a-z0-9_\-]*$")
 PAGES_PER_VIEW = 20
+ABGLEICH_INTERVALL = 300   # Sekunden zwischen automatischen Abgleichen
+ABGLEICH_VERZOEGERUNG = 10  # nach einer Änderung kurz warten, damit mehrere Änderungen zusammen hochgehen
+UPLOAD_ACCEPT = ",".join(sorted(extract.SUPPORTED))
 
 
 def version() -> str:
@@ -118,7 +127,15 @@ def bib_executable() -> Path | None:
     return Path(found) if found else None
 
 
-def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
+def _mb(n: int | float) -> str:
+    return f"{n / 1e6:,.1f} MB".replace(",", "\u202f") if n < 1e9 else f"{n / 1e9:,.2f} GB"
+
+
+def _uhrzeit(ts: float | None) -> str:
+    return time.strftime("%H:%M", time.localtime(ts)) if ts else ""
+
+
+def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool = False) -> Flask:
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=secrets.token_hex(32),
@@ -175,7 +192,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_urlsafe(32)
         return {"csrf": session["csrf_token"], "STATUS_TEXT": STATUS_TEXT, "aktive_jobs": jobs.active(),
-                "version": version()}
+                "version": version(), "nas_anzeige": nas_anzeige(), "upload_accept": UPLOAD_ACCEPT}
 
     @app.template_filter("markiert")
     def markiert(snippet: str) -> Markup:
@@ -194,6 +211,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
         lib.write_refs_bib()
         if embed:
             submit_embeddings()
+        schedule_sync()
 
     def submit_embeddings():
         def run(job, progress):
@@ -202,6 +220,113 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
         return jobs.submit("Embeddings berechnen", run, art="embeddings", einmalig=True)
 
     app.extensions["bibliothek_embed"] = submit_embeddings
+
+    # --- Abgleich mit der Nextcloud ------------------------------------------------------------
+    # Nur hier wird die Erreichbarkeit bestimmt; Seiten lesen den gemerkten Zustand (kein Netz beim Rendern).
+    abgleich = {"laeuft": False, "online": None, "zuletzt": None, "ausstehend": None,
+                "meldung": "", "konflikte": [], "fehler": [], "job": None}
+    login = {"status": "", "meldung": "", "url": "", "abbrechen": False}
+    timer_lock = threading.Lock()
+    timer: dict = {"t": None}
+    app.extensions["bibliothek_abgleich"] = abgleich
+
+    def ausstehend_zaehlen() -> None:
+        try:
+            a = dateien.ausstehend(lib)
+            abgleich["ausstehend"] = {"originale": a["originale"], "bytes": a["bytes"], "ocr": len(a["ocr"])}
+        except Exception:
+            pass
+
+    def submit_sync(grund: str = ""):
+        if not dateien.nas_aktiv():
+            return None
+
+        def run(job, progress):
+            abgleich["laeuft"] = True
+            abgleich["job"] = job.id
+            if grund:
+                progress(f"Anlass: {grund}")
+            try:
+                bericht = sync.abgleichen(lib, fortschritt=progress)
+            except sync.Gesperrt:
+                progress("Ein anderer Abgleich (Kommandozeile) läuft gerade — übersprungen.")
+                return {"uebersprungen": True}
+            except ablage.NichtErreichbar as exc:
+                abgleich["online"] = False
+                abgleich["meldung"] = str(exc)
+                progress(str(exc))
+                return {"status": "offline"}
+            except ablage.AblageFehler as exc:
+                abgleich["meldung"] = str(exc)
+                raise
+            finally:
+                abgleich["laeuft"] = False
+                ausstehend_zaehlen()
+            status = bericht.get("status")
+            abgleich["online"] = status != "offline"
+            if status == "ok":
+                abgleich["zuletzt"] = time.time()
+                abgleich["meldung"] = ""
+            elif status == "offline":
+                abgleich["meldung"] = "Nextcloud nicht erreichbar — Änderungen bleiben vorgemerkt."
+            abgleich["konflikte"] = list(bericht.get("konflikte") or [])
+            abgleich["fehler"] = list(bericht.get("fehler") or [])
+            for k in abgleich["konflikte"]:
+                progress(f"Konflikt: andere Fassung gesichert als {k}")
+            for f in abgleich["fehler"]:
+                progress(f"Fehler: {f}")
+            for e in bericht.get("eingang") or []:
+                progress(f"Eingang: {e}")
+            progress(f"Fertig: {bericht.get('hoch', 0)} hoch, {bericht.get('runter', 0)} runter")
+            if bericht.get("geholt") or bericht.get("eingang"):
+                submit_embeddings()
+            return {k: v for k, v in bericht.items() if k != "ausstehend"}
+
+        return jobs.submit("Abgleich mit der Nextcloud", run, art="abgleich", einmalig=True)
+
+    def schedule_sync(delay: float = ABGLEICH_VERZOEGERUNG) -> None:
+        """Abgleich kurz nach einer Änderung; weitere Änderungen verschieben ihn (debounce)."""
+        if not app.config.get("AUTO_SYNC") or not dateien.nas_aktiv():
+            return
+        with timer_lock:
+            if timer["t"] is not None:
+                timer["t"].cancel()
+            t = threading.Timer(delay, lambda: submit_sync("Änderung"))
+            t.daemon = True
+            timer["t"] = t
+            t.start()
+
+    def periodisch() -> None:
+        time.sleep(3)
+        while True:
+            try:
+                submit_sync("regelmäßig")
+            except Exception:
+                pass
+            time.sleep(ABGLEICH_INTERVALL)
+
+    app.config["AUTO_SYNC"] = auto_sync
+    app.extensions["bibliothek_sync"] = submit_sync
+    if auto_sync:
+        threading.Thread(target=periodisch, name="bibliothek-abgleich", daemon=True).start()
+
+    def nas_anzeige() -> dict:
+        """Statusanzeige für die Kopfzeile — ohne Netzzugriff."""
+        if not dateien.nas_aktiv():
+            return {"klasse": "aus", "text": "kein NAS"}
+        if abgleich["laeuft"]:
+            return {"klasse": "laeuft", "text": "gleiche ab …"}
+        if abgleich["ausstehend"] is None:
+            ausstehend_zaehlen()
+        a = abgleich["ausstehend"] or {}
+        offen = (a.get("originale") or 0) + (a.get("ocr") or 0)
+        if abgleich["online"] is False:
+            return {"klasse": "offline", "text": "offline" + (f" · {offen} ausstehend" if offen else "")}
+        zuletzt = abgleich["zuletzt"] or (sync.status(lib).get("zuletzt") or None)
+        if zuletzt:
+            text = f"abgeglichen {_uhrzeit(zuletzt)}" + (f" · {offen} ausstehend" if offen else "")
+            return {"klasse": "warn" if offen or abgleich["konflikte"] else "ok", "text": text}
+        return {"klasse": "aus", "text": "noch nicht abgeglichen"}
 
     # --- Übersicht -------------------------------------------------------------------------
     @app.get("/")
@@ -234,9 +359,10 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
     def titel(key):
         item = get_item(key)
         pages = lib.pages(key)
-        ocr_dir = Path(item.text.get("ocr_ordner") or "")
-        review = bool(item.text.get("ocr_ordner")) and (ocr_dir / "review.html").exists()
+        review = bool(dateien.ocr_ort(item))
+        orte = {d: ("lokal" if (lib.folder(key) / d).is_file() else "nas") for d in item.dateien}
         return render_template("titel.html", item=item, seitenzahl=len(pages), typen=EINTRAGSTYPEN, review=review,
+                               orte=orte, nas=dateien.nas_aktiv(),
                                abschnitte=_segment_rows(item, pages),
                                beispiele=[] if item.segments() else _samples(pages, 6))
 
@@ -345,6 +471,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
         item.seitenzaehlung = sz
         lib.save(item)   # schreibt text.md mit den neuen Seitenmarken
         index.update(lib, keys=[item.citekey])
+        schedule_sync()
         flash(meldung, "ok")
         return back
 
@@ -401,12 +528,25 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
         return render_template("text.html", item=item, pages=shown, gesamt=len(pages), start=start,
                                schritt=PAGES_PER_VIEW, ziel=scan)
 
+    def nas_fehlerseite(exc: Exception):
+        if isinstance(exc, ablage.NichtErreichbar):
+            meldung = ("Nextcloud nicht erreichbar — die Datei liegt auf dem NAS. Im Heimnetz erneut versuchen. "
+                       "Suche und Text funktionieren auch ohne Verbindung.")
+            return render_template("fehler.html", code=503, meldung=meldung), 503
+        return render_template("fehler.html", code=502, meldung=f"Nextcloud: {exc}"), 502
+
     @app.get("/titel/<key>/datei/<path:name>")
     def datei(key, name):
         item = get_item(key)
         if name not in item.dateien:
             abort(404, "Datei gehört nicht zu diesem Titel.")
-        resp = send_from_directory(lib.folder(key), name, as_attachment=bool(request.args.get("laden")))
+        try:
+            path = dateien.original(lib, item, name)
+        except FileNotFoundError:
+            abort(404, "Datei nicht gefunden — weder lokal noch auf der Nextcloud.")
+        except ablage.AblageFehler as exc:
+            return nas_fehlerseite(exc)
+        resp = send_file(path, as_attachment=bool(request.args.get("laden")), download_name=name)
         if name.lower().endswith((".html", ".htm", ".xhtml", ".svg")):
             # Gespeicherte Webseiten dürfen im Kontext der Bibliothek keine Skripte ausführen
             resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
@@ -418,10 +558,15 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
     @app.get("/titel/<key>/ocr/<path:name>")
     def ocr_datei(key, name):
         item = get_item(key)
-        folder = item.text.get("ocr_ordner")
-        if not folder or not (name == "review.html" or name.startswith(("previews/", "pages/"))):
+        if not dateien.ocr_ort(item) or not (name == "review.html" or name.startswith(("previews/", "pages/"))):
             abort(404)
-        resp = send_from_directory(folder, name)
+        try:
+            path = dateien.ocr_datei(lib, item, name)
+        except FileNotFoundError:
+            abort(404, "Diese Datei gibt es im OCR-Lauf nicht.")
+        except ablage.AblageFehler as exc:
+            return nas_fehlerseite(exc)
+        resp = send_file(path)
         # review.html bringt eigenes <style> mit, aber keine Skripte
         resp.headers["Content-Security-Policy"] = (
             "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'self'")
@@ -497,13 +642,9 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
     def aufnehmen():
         return render_template("aufnehmen.html", typen=EINTRAGSTYPEN)
 
-    @app.post("/aufnehmen/dateien")
-    def aufnehmen_dateien():
-        files = [f for f in request.files.getlist("dateien") if f and f.filename]
-        if not files:
-            flash("Keine Datei ausgewählt.", "fehler")
-            return redirect(url_for("aufnehmen"))
-        kw = common_kw(request.form)
+    def start_upload(files, form):
+        """Hochgeladene Dateien zwischenspeichern und als Aufnahme-Job einreihen."""
+        kw = common_kw(form)
         if len(files) > 1:
             kw.pop("felder", None)   # Autor/Titel gelten nur für eine einzelne Datei
         tmp = Path(tempfile.mkdtemp(prefix="bibliothek-upload-"))
@@ -514,7 +655,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
             target = tmp / f"{len(saved):03d}-{name}"
             f.save(target)
             saved.append((f.filename, target))
-        run_ocr = not request.form.get("ohne_ocr")
+        run_ocr = not form.get("ohne_ocr")
 
         def run(job, progress):
             neu, doppelt, fehler = [], [], []
@@ -543,8 +684,26 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
                 shutil.rmtree(tmp, ignore_errors=True)
             return {"neu": neu, "doppelt": doppelt, "fehler": fehler}
 
-        job = jobs.submit(f"Aufnahme: {len(saved)} Datei(en)", run, art="aufnahme")
+        return jobs.submit(f"Aufnahme: {len(saved)} Datei(en)", run, art="aufnahme")
+
+    @app.post("/aufnehmen/dateien")
+    def aufnehmen_dateien():
+        files = [f for f in request.files.getlist("dateien") if f and f.filename]
+        if not files:
+            flash("Keine Datei ausgewählt.", "fehler")
+            return redirect(url_for("aufnehmen"))
+        job = start_upload(files, request.form)
         return redirect(url_for("job_seite", job_id=job.id))
+
+    @app.post("/aufnehmen/schnell")
+    def aufnehmen_schnell():
+        """Knopf „Literatur hinzufügen“: Dateien ohne weitere Angaben aufnehmen (JSON-Antwort)."""
+        files = [f for f in request.files.getlist("dateien") if f and f.filename]
+        if not files:
+            abort(400, "Keine Datei ausgewählt.")
+        job = start_upload(files, {})
+        return jsonify(job=job.id, url=url_for("job_seite", job_id=job.id),
+                       api=url_for("api_job", job_id=job.id), anzahl=len(files))
 
     @app.post("/aufnehmen/scans")
     def aufnehmen_scans():
@@ -624,10 +783,22 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
             st = {}
         local_bin = Path.home() / ".local" / "bin"
         on_path = str(local_bin) in os.environ.get("PATH", "").split(os.pathsep)
+        nas = ablage.einstellungen() if dateien.nas_aktiv() else None
+        info = {}
+        if nas:
+            if abgleich["ausstehend"] is None:
+                ausstehend_zaehlen()
+            a = abgleich["ausstehend"] or {}
+            zuletzt = abgleich["zuletzt"] or sync.status(lib).get("zuletzt")
+            info = {"zuletzt": time.strftime("%d.%m.%Y %H:%M", time.localtime(zuletzt)) if zuletzt else "",
+                    "originale": a.get("originale", 0), "mb": _mb(a.get("bytes", 0)), "ocr": a.get("ocr", 0),
+                    "online": abgleich["online"], "meldung": abgleich["meldung"], "konflikte": abgleich["konflikte"],
+                    "fehler": abgleich["fehler"]}
         return render_template("einstellungen.html", settings=config.settings(), root=lib.root,
                                sprache=config.ocr_language(), stats=st, bib=bib_executable(),
                                windows=sys.platform == "win32", on_path=on_path,
-                               settings_file=config.SETTINGS_FILE)
+                               settings_file=config.SETTINGS_FILE, nas=nas, nas_info=info, login=login,
+                               zwischenspeicher=_mb(dateien.zwischenspeicher_groesse()))
 
     @app.post("/einstellungen")
     def einstellungen_speichern():
@@ -687,6 +858,73 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
         job = submit_embeddings()
         return redirect(url_for("job_seite", job_id=job.id))
 
+    # --- NAS / Nextcloud ---------------------------------------------------------------------------
+    @app.post("/nas/verbinden")
+    def nas_verbinden():
+        server = request.form.get("server", "").strip().rstrip("/")
+        if not re.fullmatch(r"https?://[^\s/]+(/[^\s]*)?", server):
+            flash("Server-Adresse wie http://192.168.0.70:9001 angeben.", "fehler")
+            return redirect(url_for("einstellungen") + "#nas")
+        if login["status"] == "wartet":
+            flash("Die Anmeldung läuft schon — im Browser bestätigen oder abbrechen.", "hinweis")
+            return redirect(url_for("einstellungen") + "#nas")
+        try:
+            flow = ablage.login_starten(server)
+        except ablage.AblageFehler as exc:
+            flash(str(exc), "fehler")
+            return redirect(url_for("einstellungen") + "#nas")
+        login.update(status="wartet", meldung="", url=flow.get("login", ""), abbrechen=False)
+        try:
+            webbrowser.open(login["url"])
+        except Exception:
+            pass
+
+        def warten():
+            try:
+                nas = ablage.login_abwarten(flow, abbruch=lambda: login["abbrechen"])
+                login.update(status="verbunden", meldung=f"Verbunden als {nas['benutzer']} @ {nas['server']}")
+                abgleich.update(online=True, meldung="", ausstehend=None)
+                submit_sync("neu verbunden")
+            except Exception as exc:
+                login.update(status="fehler", meldung=str(exc))
+        # Nicht im Job-Thread: das Warten auf den Browser darf Aufnahmen nicht blockieren
+        threading.Thread(target=warten, name="bibliothek-login", daemon=True).start()
+        return redirect(url_for("einstellungen") + "#nas")
+
+    @app.post("/nas/abbrechen")
+    def nas_abbrechen():
+        login["abbrechen"] = True
+        login.update(status="", meldung="", url="")
+        flash("Anmeldung abgebrochen.", "ok")
+        return redirect(url_for("einstellungen") + "#nas")
+
+    @app.get("/api/nas/login")
+    def api_nas_login():
+        return jsonify(status=login["status"], meldung=login["meldung"], url=login["url"])
+
+    @app.post("/nas/abgleichen")
+    def nas_abgleichen():
+        job = submit_sync("von Hand")
+        if not job:
+            flash("Keine Nextcloud verbunden.", "fehler")
+            return redirect(url_for("einstellungen") + "#nas")
+        return redirect(url_for("job_seite", job_id=job.id))
+
+    @app.post("/nas/trennen")
+    def nas_trennen():
+        ablage.trennen()
+        login.update(status="", meldung="", url="")
+        abgleich.update(online=None, zuletzt=None, ausstehend=None, meldung="", konflikte=[], fehler=[])
+        flash("Nextcloud getrennt. Dateien auf dem NAS bleiben erhalten; Originale, die nur dort liegen, "
+              "sind ohne Verbindung nicht zu öffnen.", "ok")
+        return redirect(url_for("einstellungen") + "#nas")
+
+    @app.post("/nas/zwischenspeicher-leeren")
+    def nas_zwischenspeicher_leeren():
+        frei = dateien.aufraeumen(0)
+        flash(f"Zwischenspeicher geleert ({_mb(frei)} frei).", "ok")
+        return redirect(url_for("einstellungen") + "#nas")
+
     @app.post("/beenden")
     def beenden():
         stop = app.config.get("SHUTDOWN")
@@ -697,7 +935,12 @@ def create_app(lib: Library, *, runner: JobRunner | None = None) -> Flask:
     # --- JSON-API für die CLI ------------------------------------------------------------------------
     @app.get("/api/status")
     def api_status():
-        return jsonify(bibliothek=str(lib.root), version=version(), jobs=jobs.active())
+        nas = ablage.einstellungen() if dateien.nas_aktiv() else None
+        if nas:
+            nas = {k: nas.get(k) for k in ("server", "benutzer", "ordner")}
+        stand = {k: abgleich[k] for k in ("laeuft", "online", "zuletzt", "ausstehend", "meldung", "konflikte", "fehler")}
+        stand["anzeige"] = nas_anzeige()
+        return jsonify(bibliothek=str(lib.root), version=version(), jobs=jobs.active(), nas=nas, abgleich=stand)
 
     @app.get("/api/suche")
     def api_suche():

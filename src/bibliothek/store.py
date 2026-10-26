@@ -226,14 +226,29 @@ class Library:
 
     def delete(self, key: str) -> None:
         shutil.rmtree(self.folder(key))
+        self._journal({"op": "loeschen", "key": key})
 
     def rename(self, item: Item, new_key: str) -> Item:
         if self.exists(new_key):
             raise ValueError(f"{new_key} existiert schon")
-        self.folder(item.citekey).rename(self.folder(new_key))
+        old = item.citekey
+        self.folder(old).rename(self.folder(new_key))
         item.citekey = new_key
+        ocr = item.text.get("ocr_ordner") or ""
+        if ocr == f"nas:ocr/{old}":
+            item.text["ocr_ordner"] = f"nas:ocr/{new_key}"
         self.save(item)
+        self._journal({"op": "umbenennen", "von": old, "nach": new_key})
         return item
+
+    def _journal(self, entry: dict) -> None:
+        """Umbenennen/Löschen für den Abgleich mit der Nextcloud vormerken."""
+        if not (config.settings().get("nas") or {}).get("server"):
+            return
+        path = config.sync_dir(self.root) / "journal.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # -- Seiten ---------------------------------------------------------------
     def pages(self, key: str) -> list[Page]:

@@ -84,10 +84,19 @@ def index_path(root: Path) -> Path:
     Cloud-Synchronisation (iCloud, Nextcloud …), und jeder Rechner baut ihn
     aus den synchronisierten Titel-Dateien selbst auf.
     """
+    return data_dir() / "indizes" / f"{_tag(root)}.sqlite"
+
+
+def sync_dir(root: Path) -> Path:
+    """Abgleichsstand mit der Nextcloud (pro Bibliothek und Rechner)."""
+    return data_dir() / "abgleich" / _tag(root)
+
+
+def _tag(root: Path) -> str:
     import hashlib
 
     digest = hashlib.sha1(str(root.resolve()).encode()).hexdigest()[:12]
-    return data_dir() / "indizes" / f"{root.name}-{digest}.sqlite"
+    return f"{root.name}-{digest}"
 
 
 ROOT = library_root()

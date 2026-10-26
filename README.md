@@ -46,6 +46,35 @@ Programmordner (`~/Library/Application Support/Bibliothek/indizes`,
 So kann der Bibliotheksordner in iCloud, Nextcloud oder Syncthing liegen. Jeder
 Rechner baut seinen Index mit `bib index` selbst.
 
+## Nextcloud als Ablage (optional)
+
+Originale und OCR-Läufe können auf einer Nextcloud liegen statt auf dem Rechner.
+Lokal bleiben nur Katalog und Suchindex (wenige MB), deshalb funktionieren Suche,
+Lesen und KI auch ohne Verbindung. Originale werden beim Öffnen geholt und in
+einem Zwischenspeicher (höchstens 2 GB) gehalten. Der Katalog gleicht sich über
+die Nextcloud zwischen allen Rechnern ab.
+
+**Eigener Benutzer.** Die Bibliothek nimmt kein Admin-Konto an. Lege in der
+Nextcloud einen eigenen Benutzer an (z. B. `bibliothek`, nicht in der Gruppe
+admin) — er sieht nichts von deinen anderen Dateien. Willst du den Eingang aus
+deinem eigenen Konto befüllen, gibt dieser Benutzer seinen Ordner `Bibliothek`
+für dich frei.
+
+```sh
+bib nas verbinden http://nas:9001 --ohne-browser   # Link in einem privaten Fenster öffnen, als dieser Benutzer anmelden
+bib sync                                          # erster Abgleich = Umzug
+bib nas                                           # Status, Ausstehendes, Zwischenspeicher
+bib oeffne <citekey>                              # Original öffnen (holt es bei Bedarf)
+bib nas trennen                                   # Zugang löschen, auch auf der Nextcloud
+```
+
+Auf der Nextcloud: `Bibliothek/titel/<citekey>/` (Katalog + Originale),
+`Bibliothek/ocr/<citekey>/` (Scans), `Bibliothek/Eingang/` — was dort liegt
+(Dateien oder ein Ordner mit Buchfotos), nimmt die App automatisch auf und
+entfernt es danach aus dem Eingang. Die App gleicht beim Start, alle 5 Minuten
+und nach Änderungen ab; ohne Verbindung bleibt alles vorgemerkt. Das App-Passwort
+liegt im Schlüsselbund des Systems.
+
 ## Installation
 
 Fertige Pakete entstehen per GitHub Actions (`.github/workflows/release.yml`) bei

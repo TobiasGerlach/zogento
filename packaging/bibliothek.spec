@@ -34,6 +34,7 @@ for dist in (
     "transformers", "sentence-transformers", "tokenizers", "huggingface-hub", "safetensors",
     "torch", "tqdm", "regex", "requests", "packaging", "filelock", "numpy", "PyYAML",
     "Pillow", "scipy", "scikit-learn", "pypdfium2",
+    "keyring",   # findet seine Backends über Entry-Points in den Metadaten
 ):
     try:
         datas += copy_metadata(dist)
@@ -44,6 +45,7 @@ hiddenimports = []
 hiddenimports += collect_submodules("bibliothek")
 hiddenimports += collect_submodules("immich_book_ocr")
 hiddenimports += collect_submodules("sentence_transformers")
+hiddenimports += collect_submodules("keyring.backends")   # Schlüsselbund: macOS, Windows, Secret Service
 hiddenimports += [
     "smoke",
     "striprtf.striprtf",

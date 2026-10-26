@@ -21,7 +21,22 @@
     <form class="schnellsuche" action="{{ url_for('suche') }}" method="get" role="search">
       <input type="search" name="q" placeholder="In allen Texten suchen …" aria-label="Suche" value="{{ request.args.get('q', '') if request.endpoint == 'suche' else '' }}">
     </form>
+    <form class="hinzufuegen" method="post" action="{{ url_for('aufnehmen_dateien') }}" enctype="multipart/form-data"
+          data-hinzufuegen="{{ url_for('aufnehmen_schnell') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="knopf" title="Dateien auswählen und sofort aufnehmen (PDF, Word, EPUB, Bilder …)">
+        ＋ Literatur hinzufügen
+        <input type="file" name="dateien" multiple accept="{{ upload_accept }}" data-hinzufuegen-datei>
+      </label>
+      <noscript><button type="submit" class="zweitrangig">Hochladen</button></noscript>
+    </form>
+    <a class="nas-status nas-{{ nas_anzeige.klasse }}" href="{{ url_for('einstellungen') }}#nas"
+       data-nas-status="{{ url_for('api_status') }}" title="Abgleich mit der Nextcloud">
+      <span class="punkt" aria-hidden="true"></span><span data-nas-text>{{ nas_anzeige.text }}</span>
+    </a>
   </header>
+  <div class="toasts" aria-live="polite" data-toasts data-titel-url="{{ url_for('titel', key='__KEY__') }}"></div>
+  <div class="ablegen-ueberall" data-ablegen hidden><p>Loslassen, um die Dateien aufzunehmen</p></div>
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for kategorie, meldung in messages %}

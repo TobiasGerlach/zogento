@@ -55,7 +55,8 @@ class Server:
     def __init__(self, lib: Library, port: int):
         from .web import create_app
 
-        self.app = create_app(lib)
+        # auto_sync: Abgleich mit der Nextcloud beim Start, alle 5 Minuten und nach Änderungen
+        self.app = create_app(lib, auto_sync=True)
         self.app.config["SHUTDOWN"] = self.stop
         self.httpd = make_server("127.0.0.1", port, self.app, threaded=True)
         self.port = port

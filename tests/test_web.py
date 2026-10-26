@@ -2,11 +2,17 @@ import io
 
 import pytest
 
-from bibliothek import index, web
+from bibliothek import ablage, index, web
 from bibliothek.jobs import JobRunner
 from bibliothek.store import STATUS_AUTO, STATUS_BESTAETIGT, Item, Library, Page
 
 TOKEN = "test-token"
+
+
+@pytest.fixture(autouse=True)
+def _ohne_nas(monkeypatch):
+    """Eine echte Nextcloud in den Einstellungen dieses Rechners darf hier nicht mitspielen."""
+    monkeypatch.setattr(ablage, "verbunden", lambda: False)
 
 
 @pytest.fixture

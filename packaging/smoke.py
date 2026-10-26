@@ -14,6 +14,7 @@ def run() -> int:
         "striprtf.striprtf", "pypdfium2", "torch", "transformers", "sentence_transformers",
         "transformers.models.qwen3.modeling_qwen3", "immich_book_ocr.pipeline",
         "bibliothek.store", "bibliothek.extract", "bibliothek.index", "bibliothek.ingest",
+        "bibliothek.ablage", "bibliothek.sync", "keyring",
     ]
     if sys.platform != "linux":
         modules.append("webview")
@@ -35,6 +36,8 @@ def run() -> int:
         doc.new_page(200, 300)
         print("ok    pdfium seiten:", len(doc))
         print("ok    torch:", torch.__version__, float(torch.ones(3).sum()))
+        import keyring
+        print("ok    schlüsselbund:", type(keyring.get_keyring()).__module__)   # auf CI ohne Desktop evtl. „fail“
         from importlib.resources import files
         for pkg in ("bibliothek", "immich_book_ocr"):
             tmpl = files(pkg) / "templates"

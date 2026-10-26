@@ -12,7 +12,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Callable
 
-from . import bibtex, extract, index, ingest, ocr
+from . import bibtex, dateien, extract, index, ingest, ocr
 from .store import Item, Library
 
 Progress = Callable[[str], None]
@@ -34,6 +34,9 @@ def _attach_file(lib: Library, item: Item, path: Path, progress: Progress) -> No
         n += 1
     shutil.copy2(path, target)
     item.dateien.append(target.name)
+    item.text.setdefault("sha256", [])
+    if ingest.pruefsumme(target) not in item.text["sha256"]:
+        item.text["sha256"].append(ingest.pruefsumme(target))
     lib.save(item, render=False)
     if not _has_text(lib, item.citekey):
         _text_from_file(lib, item, target, progress)
@@ -47,10 +50,10 @@ def _text_from_file(lib: Library, item: Item, path: Path, progress: Progress) ->
         return
     pages = ex.pages
     hinweise = list(ex.hinweise)
-    item.text = {"quelle": ex.quelle}
+    item.text = {"quelle": ex.quelle, "sha256": item.text.get("sha256", [])}
     if ex.ocr_noetig:
         try:
-            out = lib.root / "ocr" / item.citekey
+            out = dateien.ocr_workdir(lib, item.citekey)
             if ex.quelle == "bild":
                 pages = ingest._ocr_single_image(path, out, progress)
             else:

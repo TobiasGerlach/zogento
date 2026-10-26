@@ -30,6 +30,9 @@ document.addEventListener("DOMContentLoaded", () => {
   seitenvorschau();
   ablage();
   jobanzeige();
+  schnellAufnahme();
+  nasStatus();
+  nasLogin();
 });
 
 function seitenvorschau() {
@@ -148,4 +151,158 @@ function jobanzeige() {
     setTimeout(holen, 1200);
   };
   holen();
+}
+
+// --- Literatur hinzufügen: Knopf in der Kopfzeile und Ablegen irgendwo auf der Seite ---------
+function toast(inhalt, art) {
+  const box = document.querySelector("[data-toasts]");
+  const t = document.createElement("div");
+  t.className = "toast " + (art || "");
+  t.setAttribute("role", "status");
+  const zu = document.createElement("button");
+  zu.type = "button";
+  zu.className = "toast-zu";
+  zu.setAttribute("aria-label", "Meldung schließen");
+  zu.textContent = "×";
+  zu.addEventListener("click", () => t.remove());
+  const text = document.createElement("div");
+  text.className = "toast-text";
+  t.append(text, zu);
+  box.appendChild(t);
+  const setzen = (neu, neueArt) => {
+    text.textContent = "";
+    (Array.isArray(neu) ? neu : [neu]).forEach((x) => text.append(x));
+    if (neueArt !== undefined) t.className = "toast " + neueArt;
+  };
+  setzen(inhalt);
+  return { el: t, setzen, schliessen: (ms) => setTimeout(() => t.remove(), ms) };
+}
+
+function schnellAufnahme() {
+  const form = document.querySelector("form[data-hinzufuegen]");
+  if (!form) return;
+  const input = form.querySelector("[data-hinzufuegen-datei]");
+  const csrf = form.querySelector("input[name=csrf]").value;
+  const titelUrl = document.querySelector("[data-toasts]").dataset.titelUrl;
+  const erlaubt = (input.getAttribute("accept") || "").split(",");
+
+  const link = (key, text) => {
+    const a = document.createElement("a");
+    a.href = titelUrl.replace("__KEY__", encodeURIComponent(key));
+    a.textContent = text || key;
+    return a;
+  };
+
+  const verfolgen = (antwort, t) => {
+    const jobLink = document.createElement("a");
+    jobLink.href = antwort.url;
+    jobLink.textContent = "Fortschritt";
+    t.setzen([`Nehme ${antwort.anzahl} Datei(en) auf … `, jobLink], "laeuft");
+    const holen = async () => {
+      let job;
+      try {
+        const r = await fetch(antwort.api, { headers: { Accept: "application/json" } });
+        job = await r.json();
+      } catch (e) { setTimeout(holen, 3000); return; }
+      if (job.status !== "fertig" && job.status !== "fehler") {
+        const letzte = job.log.length ? job.log[job.log.length - 1].replace(/^\S+\s+/, "") : "";
+        t.setzen([`Nehme ${antwort.anzahl} Datei(en) auf … `, letzte ? letzte + " · " : "", jobLink], "laeuft");
+        setTimeout(holen, 1500);
+        return;
+      }
+      if (job.status === "fehler") { t.setzen(["Aufnahme fehlgeschlagen: " + job.fehler + " · ", jobLink], "fehler"); return; }
+      const e = job.ergebnis || {};
+      const teile = [];
+      if ((e.neu || []).length) {
+        teile.push("Aufgenommen: ");
+        e.neu.forEach((k, i) => { if (i) teile.push(", "); teile.push(link(k)); });
+        teile.push(". ");
+      }
+      (e.doppelt || []).forEach((d) => { teile.push(`„${d.datei}“ gibt es schon: `); teile.push(link(d.citekey)); teile.push(". "); });
+      (e.fehler || []).forEach((d) => teile.push(`„${d.datei}“: ${d.fehler}. `));
+      if (!teile.length) teile.push("Nichts aufgenommen.");
+      t.setzen(teile, (e.fehler || []).length ? "fehler" : ((e.doppelt || []).length && !(e.neu || []).length ? "hinweis" : "ok"));
+      if (!(e.fehler || []).length) t.schliessen(20000);
+    };
+    holen();
+  };
+
+  const hochladen = async (dateien) => {
+    const liste = Array.from(dateien).filter((f) => {
+      const endung = "." + (f.name.split(".").pop() || "").toLowerCase();
+      return erlaubt.includes(endung);
+    });
+    const abgelehnt = dateien.length - liste.length;
+    if (abgelehnt) toast(`${abgelehnt} Datei(en) übersprungen — Format wird nicht unterstützt.`, "hinweis").schliessen(8000);
+    if (!liste.length) return;
+    const daten = new FormData();
+    liste.forEach((f) => daten.append("dateien", f, f.name));
+    const t = toast(`Lade ${liste.length} Datei(en) hoch …`, "laeuft");
+    try {
+      const r = await fetch(form.dataset.hinzufuegen, { method: "POST", body: daten, headers: { "X-CSRF-Token": csrf, Accept: "application/json" } });
+      const antwort = await r.json();
+      if (!r.ok) { t.setzen("Hochladen fehlgeschlagen: " + (antwort.fehler || r.status), "fehler"); return; }
+      verfolgen(antwort, t);
+    } catch (e) {
+      t.setzen("Hochladen fehlgeschlagen: " + e, "fehler");
+    }
+  };
+
+  input.addEventListener("change", () => {
+    if (input.files.length) hochladen(input.files);
+    input.value = "";
+  });
+
+  // Dateien irgendwo auf die Seite ziehen (außer auf die eigene Ablagefläche der Seite „Aufnehmen“)
+  const schicht = document.querySelector("[data-ablegen]");
+  let tiefe = 0;
+  const istDateien = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+  const eigeneZone = (e) => e.target.closest && e.target.closest("[data-ablage]");
+  window.addEventListener("dragenter", (e) => { if (!istDateien(e) || eigeneZone(e)) return; tiefe++; schicht.hidden = false; });
+  window.addEventListener("dragleave", (e) => { if (!istDateien(e)) return; tiefe = Math.max(0, tiefe - 1); if (!tiefe) schicht.hidden = true; });
+  window.addEventListener("dragover", (e) => { if (istDateien(e) && !eigeneZone(e)) e.preventDefault(); });
+  window.addEventListener("drop", (e) => {
+    if (!istDateien(e) || eigeneZone(e)) return;
+    e.preventDefault();
+    tiefe = 0;
+    schicht.hidden = true;
+    hochladen(e.dataTransfer.files);
+  });
+}
+
+// --- Statusanzeige Nextcloud ---------------------------------------------------------------------
+function nasStatus() {
+  const el = document.querySelector("[data-nas-status]");
+  if (!el) return;
+  const text = el.querySelector("[data-nas-text]");
+  const holen = async () => {
+    let laeuft = false;
+    try {
+      const r = await fetch(el.dataset.nasStatus, { headers: { Accept: "application/json" } });
+      const s = await r.json();
+      const a = (s.abgleich || {}).anzeige;
+      if (a) {
+        text.textContent = a.text;
+        el.className = "nas-status nas-" + a.klasse;
+        laeuft = a.klasse === "laeuft";
+      }
+    } catch (e) { /* Server beendet */ }
+    setTimeout(holen, laeuft ? 3000 : 30000);
+  };
+  setTimeout(holen, el.classList.contains("nas-laeuft") ? 3000 : 30000);
+}
+
+// --- Anmeldung bei der Nextcloud: warten, bis im Browser bestätigt ---------------------------------
+function nasLogin() {
+  const box = document.querySelector("[data-nas-login]");
+  if (!box || box.dataset.loginStatus !== "wartet") return;
+  const holen = async () => {
+    try {
+      const r = await fetch(box.dataset.nasLogin, { headers: { Accept: "application/json" } });
+      const s = await r.json();
+      if (s.status !== "wartet") { window.location.reload(); return; }
+    } catch (e) { /* weiter versuchen */ }
+    setTimeout(holen, 2000);
+  };
+  setTimeout(holen, 2000);
 }

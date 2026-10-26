@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from . import bibtex, extract, index, ocr, pagenums
+from . import bibtex, dateien, extract, index, ocr, pagenums
 from .store import (STATUS_AUTO, STATUS_KEINE, STATUS_PDF, STATUS_UNBEKANNT, Item, Library, Page)
 
 Progress = Callable[[str], None]
@@ -68,6 +68,11 @@ def add_file(lib: Library, path: Path, *, felder: dict[str, str] | None = None, 
              reindex: bool = True, herkunft: str = "", progress: Progress | None = None) -> Item:
     progress = progress or (lambda _: None)
     path = Path(path).expanduser().resolve()
+    summe = pruefsumme(path)
+    if not allow_duplicate:
+        gleich = next((it for it in lib.items() if summe in (it.text.get("sha256") or [])), None)
+        if gleich:
+            raise Duplicate(gleich)
     progress(f"Lese {path.name}")
     ex = extract.extract(path)
     felder = dict(felder or {})
@@ -88,22 +93,23 @@ def add_file(lib: Library, path: Path, *, felder: dict[str, str] | None = None, 
     target = folder / _safe_name(path.name)
     shutil.copy2(path, target)
     item.dateien = [target.name]
-    item.text = {"quelle": ex.quelle}
+    item.text = {"quelle": ex.quelle, "sha256": [summe]}
 
     pages = ex.pages
     if ex.ocr_noetig and run_ocr:
         try:
             if ex.quelle == "bild":
-                pages = _ocr_single_image(target, lib.root / "ocr" / key, progress)
+                pages = _ocr_single_image(target, dateien.ocr_workdir(lib, key), progress)
                 item.text["quelle"] = "ocr"
+                item.text["ocr_ordner"] = str(dateien.ocr_workdir(lib, key))
             else:
                 progress(f"OCR für {len(ex.ocr_noetig)} Seite(n) ohne Textebene")
-                recognized = ocr.ocr_pdf_pages(target, ex.ocr_noetig, lib.root / "ocr" / key, progress=progress)
+                recognized = ocr.ocr_pdf_pages(target, ex.ocr_noetig, dateien.ocr_workdir(lib, key), progress=progress)
                 for p in pages:
                     if p.scan in recognized:
                         p.text, p.konfidenz = recognized[p.scan].text, recognized[p.scan].konfidenz
                 item.text["quelle"] = "ocr" if len(ex.ocr_noetig) == len(pages) else "pdf+ocr"
-                item.text["ocr_ordner"] = str(lib.root / "ocr" / key)
+                item.text["ocr_ordner"] = str(dateien.ocr_workdir(lib, key))
             conf = [p.konfidenz for p in pages if p.konfidenz is not None]
             if conf:
                 item.text["konfidenz"] = round(sum(conf) / len(conf), 1)
@@ -145,13 +151,13 @@ def add_scans(lib: Library, source: str, *, single_page: bool = False, order: st
               progress: Progress | None = None, **kw) -> Item:
     """OCR starten (Ordner mit Fotos oder Immich-Link) und das Ergebnis aufnehmen."""
     progress = progress or (lambda _: None)
-    work = lib.root / "ocr" / ("lauf-" + bibtex.ascii_slug(Path(source).name if "://" not in source else source)[-24:])
+    work = dateien.ocr_workdir(lib, "lauf-" + bibtex.ascii_slug(Path(source).name if "://" not in source else source)[-24:])
     if "://" in source:
         ocr.ocr_album(source, work, progress=progress)
     else:
         ocr.ocr_folder(Path(source).expanduser(), work, single_page=single_page, order=order, progress=progress)
     item = add_ocr_output(lib, work, herkunft=source, **kw)
-    final = lib.root / "ocr" / item.citekey
+    final = dateien.ocr_workdir(lib, item.citekey)
     if not final.exists():
         work.rename(final)
         item.text["ocr_ordner"] = str(final)
@@ -173,8 +179,9 @@ def reocr(lib: Library, item: Item, *, progress: Progress | None = None) -> Item
     if not pdfs:
         raise ValueError("Kein PDF zum Neu-Erkennen vorhanden")
     pages = lib.pages(item.citekey)
-    out = lib.root / "ocr" / item.citekey
-    recognized = ocr.ocr_pdf_pages(lib.folder(item.citekey) / pdfs[0], [p.scan for p in pages], out, progress=progress)
+    out = dateien.ocr_workdir(lib, item.citekey)
+    pdf = dateien.original(lib, item, pdfs[0])   # mit NAS: vorher herunterladen
+    recognized = ocr.ocr_pdf_pages(pdf, [p.scan for p in pages], out, progress=progress)
     for p in pages:
         if p.scan in recognized:
             p.text, p.konfidenz = recognized[p.scan].text, recognized[p.scan].konfidenz
@@ -203,6 +210,17 @@ def guess_title(meta_title: str | None, path: Path) -> tuple[str, str]:
     stem = re.sub(r"^\d+([\-–]\d+)?[\s.\-_]+", "", stem)          # Kursnummerierung vorne (03-04 …)
     stem = stem.strip() or path.stem
     return stem, "Titel aus dem Dateinamen — prüfen."
+
+
+def pruefsumme(path: Path) -> str:
+    """SHA-256 des Dateiinhalts — erkennt dieselbe Datei unter anderem Namen."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def _guess_type(ex: extract.Extracted) -> str:

@@ -16,6 +16,46 @@
   </form>
 </section>
 
+<section class="karte" id="nas" data-nas-login="{{ url_for('api_nas_login') }}" data-login-status="{{ login.status }}">
+  <h2>NAS / Nextcloud</h2>
+  {% if nas %}
+    <p><strong>Verbunden</strong> als <code>{{ nas.benutzer }}</code> @ <code>{{ nas.server }}</code>, Ordner <code>{{ nas.ordner or 'Bibliothek' }}</code>
+      {% if nas_info.online is sameas false %}<span class="warnung">gerade nicht erreichbar</span>{% endif %}</p>
+    <ul class="kennzahlen">
+      <li>Letzter Abgleich: {{ nas_info.zuletzt or 'noch keiner' }}</li>
+      <li>Ausstehend: {{ nas_info.originale }} Datei(en) ({{ nas_info.mb }}){% if nas_info.ocr %}, {{ nas_info.ocr }} OCR-Lauf/Läufe{% endif %}</li>
+      <li>Zwischenspeicher auf diesem Rechner: {{ zwischenspeicher }}</li>
+    </ul>
+    {% if nas_info.meldung %}<p class="meldung hinweis">{{ nas_info.meldung }}</p>{% endif %}
+    {% if nas_info.konflikte %}<p class="meldung hinweis">Konflikte (die andere Fassung liegt auf der Nextcloud):
+      {% for k in nas_info.konflikte %}<code>{{ k }}</code>{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+    {% if nas_info.fehler %}<p class="meldung fehler">Beim letzten Abgleich: {{ nas_info.fehler|join('; ') }}</p>{% endif %}
+    <p class="leise">Neue Literatur kannst du auch in der Nextcloud ablegen: Dateien oder Ordner mit Buchfotos nach
+      <code>{{ nas.ordner or 'Bibliothek' }}/Eingang</code> legen — die App nimmt sie automatisch auf.
+      Originale und Scans liegen auf dem NAS und werden erst beim Öffnen geholt; Suche und Text gehen auch unterwegs.</p>
+    <div class="reihe">
+      <form method="post" action="{{ url_for('nas_abgleichen') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Jetzt abgleichen</button></form>
+      <form method="post" action="{{ url_for('nas_zwischenspeicher_leeren') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Zwischenspeicher leeren</button></form>
+      <form method="post" action="{{ url_for('nas_trennen') }}" data-bestaetigen="Verbindung zur Nextcloud trennen? Die Dateien auf dem NAS bleiben erhalten."><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="gefaehrlich">Trennen</button></form>
+    </div>
+  {% elif login.status == 'wartet' %}
+    <p class="meldung hinweis" data-login-warten>Im Browser bei der Nextcloud anmelden und „Zugriff gewähren“ klicken — diese Seite aktualisiert sich dann von selbst.</p>
+    {% if login.url %}<p class="leise">Kein Browserfenster aufgegangen? <a href="{{ login.url }}" target="_blank" rel="noopener">Anmeldeseite öffnen</a></p>{% endif %}
+    <form method="post" action="{{ url_for('nas_abbrechen') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Abbrechen</button></form>
+  {% else %}
+    {% if login.status == 'fehler' %}<p class="meldung fehler">{{ login.meldung }}</p>{% endif %}
+    <p>Mit einer Nextcloud liegen Originale und Scans auf dem NAS statt auf diesem Rechner. Hier bleiben nur Katalog und Suchindex (wenige MB); andere Rechner sehen dieselbe Bibliothek.</p>
+    <form method="post" action="{{ url_for('nas_verbinden') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="reihe">
+        <label class="feld"><span>Adresse der Nextcloud</span><input name="server" placeholder="http://192.168.0.70:9001" required></label>
+        <div class="knoepfe"><button type="submit">Mit Nextcloud verbinden</button></div>
+      </div>
+      <p class="leise">Es öffnet sich die Anmeldeseite der Nextcloud im Browser. Das Passwort bleibt dort; die App bekommt ein eigenes App-Passwort, das im Schlüsselbund dieses Rechners liegt.</p>
+    </form>
+  {% endif %}
+</section>
+
 <section class="karte">
   <h2>Kommandozeile <code>bib</code></h2>
   <p>Mit <code>bib</code> durchsuchen Claude und andere KI-Werkzeuge die Bibliothek, z. B. <code>bib suche "Ironie Jona"</code> oder <code>bib zeige feestuart2015effektives --seiten 45-47</code>.</p>

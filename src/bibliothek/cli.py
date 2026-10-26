@@ -91,6 +91,7 @@ def cmd_neu(args) -> int:
             rc = 1
     lib.write_refs_bib()
     _embed_hint(lib)
+    _nach_aenderung(lib)
     return rc
 
 
@@ -104,6 +105,7 @@ def cmd_scans(args) -> int:
     _print_numbering(lib, item)
     lib.write_refs_bib()
     _embed_hint(lib)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -118,6 +120,7 @@ def cmd_ocr_uebernehmen(args) -> int:
             print(f"= {d}: {dup}")
     lib.write_refs_bib()
     _embed_hint(lib)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -129,6 +132,7 @@ def cmd_import_bibtex(args) -> int:
     lib.write_refs_bib()
     print(stats)
     _embed_hint(lib)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -139,6 +143,7 @@ def cmd_import_zotero(args) -> int:
     lib.write_refs_bib()
     print(stats)
     _embed_hint(lib)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -309,6 +314,7 @@ def cmd_bearbeite(args) -> int:
         index.update(lib)
     lib.write_refs_bib()
     _print_item_line(item)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -349,6 +355,7 @@ def cmd_seiten(args) -> int:
         lib.save(item)
         index.update(lib, keys=[item.citekey])
     _print_numbering(lib, item)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -446,6 +453,7 @@ def cmd_loeschen(args) -> int:
     index.update(lib)
     lib.write_refs_bib()
     print(f"- {item.citekey}")
+    _nach_aenderung(lib)
     return 0
 
 
@@ -454,6 +462,7 @@ def cmd_reocr(args) -> int:
     item = ingest.reocr(lib, lib.resolve(args.titel), progress=lambda m: print("  " + m, file=sys.stderr))
     print(f"~ {item.citekey} neu erkannt (Ø Konfidenz {item.text.get('konfidenz')})")
     _embed_hint(lib)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -470,6 +479,96 @@ def cmd_einstellung(args) -> int:
     print(f"Einstellungen: {config.SETTINGS_FILE}")
     print(json.dumps(config.settings(), ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_nas(args) -> int:
+    from . import ablage, dateien, sync
+
+    if args.aktion == "verbinden":
+        if not args.server:
+            print("Server angeben, z. B.: bib nas verbinden http://192.168.0.70:9001", file=sys.stderr)
+            return 2
+        nas = ablage.verbinden(args.server, ordner=args.ordner, browser=not args.ohne_browser)
+        print(f"Verbunden als {nas['benutzer']} @ {nas['server']}, Ordner „{nas['ordner']}“.")
+        print("Erster Abgleich: bib sync   (lädt Originale und OCR-Läufe hoch, kann dauern)")
+        return 0
+    if args.aktion == "trennen":
+        ablage.trennen()
+        print("Getrennt. Dateien auf der Nextcloud bleiben, wo sie sind.")
+        return 0
+    lib = _lib()
+    st = sync.status(lib)
+    if not st["nas"]:
+        print("Kein NAS eingerichtet — alles liegt lokal. Einrichten: bib nas verbinden <server>")
+        return 0
+    import datetime as _dt
+    print(f"Nextcloud:    {st['nas']['benutzer']} @ {st['nas']['server']}, Ordner {st['nas'].get('ordner')}")
+    print("Letzter Abgleich: " + (_dt.datetime.fromtimestamp(st["zuletzt"]).strftime("%d.%m.%Y %H:%M") if st["zuletzt"] else "noch nie"))
+    a = st["ausstehend"]
+    print(f"Ausstehend:   {a['originale']} Originale ({a['bytes'] / 1e6:.0f} MB), OCR-Läufe: {', '.join(a['ocr']) or '–'}")
+    print(f"Zwischenspeicher: {st['zwischenspeicher'] / 1e6:.0f} MB ({dateien.zwischenspeicher()})")
+    return 0
+
+
+def cmd_sync(args) -> int:
+    from . import sync
+
+    lib = _lib()
+    try:
+        b = sync.abgleichen(lib, eingang=not args.ohne_eingang, fortschritt=lambda m: print("  " + m, file=sys.stderr))
+    except sync.Gesperrt as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    if b["status"] != "ok":
+        print({"kein NAS": "Kein NAS eingerichtet (bib nas verbinden <server>).",
+               "offline": "Nextcloud nicht erreichbar — Änderungen bleiben vorgemerkt."}[b["status"]])
+        return 1
+    print(f"Abgleich: {b['hoch']} hochgeladen, {b['runter']} geholt"
+          + (f", aktualisiert: {', '.join(b['geholt'])}" if b["geholt"] else ""))
+    for line in b["eingang"]:
+        print(f"  Eingang: {line}")
+    for k in b["konflikte"]:
+        print(f"  ! Konflikt — andere Fassung liegt auf der Nextcloud als {k}")
+    for f in b["fehler"]:
+        print(f"  ! {f}")
+    if (b["geholt"] or b["eingang"]) and not args.ohne_embeddings:
+        n = index.embed_missing(lib, progress=lambda m: print("\r  " + m, end="", file=sys.stderr))
+        if n:
+            print(f"\n  {n} neue Embeddings", file=sys.stderr)
+    return 0
+
+
+def cmd_oeffne(args) -> int:
+    import os
+    import subprocess
+
+    from . import dateien
+
+    lib = _lib()
+    item = lib.resolve(args.titel)
+    if not item.dateien:
+        print(f"{item.citekey} hat keine Originaldatei.", file=sys.stderr)
+        return 1
+    name = args.datei or item.dateien[0]
+    path = dateien.original(lib, item, name)
+    print(path)
+    if not args.nur_pfad:
+        if sys.platform == "darwin":
+            subprocess.run(["open", str(path)])
+        elif sys.platform == "win32":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.run(["xdg-open", str(path)])
+    return 0
+
+
+def _nach_aenderung(lib: Library) -> None:
+    """Mit NAS: Änderungen gleich abgleichen (still, wenn offline)."""
+    from . import sync
+
+    msg = sync.versuchen(lib)
+    if msg:
+        print("  " + msg, file=sys.stderr)
 
 
 def _embed_hint(lib: Library) -> None:
@@ -594,6 +693,24 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--bibliothek")
     s.add_argument("--ocr-sprache", help="Tesseract-Codes, z. B. eng+deu, deu_latf für Fraktur")
     s.set_defaults(func=cmd_einstellung)
+
+    s = sub.add_parser("nas", help="Nextcloud als Ablage: verbinden, status, trennen")
+    s.add_argument("aktion", choices=["verbinden", "status", "trennen"], nargs="?", default="status")
+    s.add_argument("server", nargs="?", help="z. B. http://192.168.0.70:9001")
+    s.add_argument("--ordner", default="Bibliothek", help="Ordner in der Nextcloud (Standard: Bibliothek)")
+    s.add_argument("--ohne-browser", action="store_true", help="Login-Link nur anzeigen")
+    s.set_defaults(func=cmd_nas)
+
+    s = sub.add_parser("sync", help="mit der Nextcloud abgleichen (inkl. Eingangsordner)")
+    s.add_argument("--ohne-eingang", action="store_true")
+    s.add_argument("--ohne-embeddings", action="store_true")
+    s.set_defaults(func=cmd_sync)
+
+    s = sub.add_parser("oeffne", help="Originaldatei öffnen (holt sie bei Bedarf vom NAS)")
+    s.add_argument("titel")
+    s.add_argument("datei", nargs="?")
+    s.add_argument("--nur-pfad", action="store_true")
+    s.set_defaults(func=cmd_oeffne)
 
     s = sub.add_parser("web", help="Oberfläche öffnen")
     s.set_defaults(func=cmd_web)
