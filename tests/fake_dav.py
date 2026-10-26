@@ -73,6 +73,10 @@ class FakeDAV:
         ziel.parent.mkdir(parents=True, exist_ok=True)
         ziel.write_bytes(self.files[rel][0])
 
+    def text(self, rel: str) -> bytes:
+        self._check()
+        return self.files[self._norm(rel)][0]
+
     def mkdirs(self, rel: str):
         self._check()
         parts = [p for p in PurePosixPath(rel or ".").parts if p not in ("/", ".")]

@@ -157,8 +157,17 @@ class WebDAV:
         self.mkdirs(str(PurePosixPath(rel).parent))
         for versuch in range(4):
             try:
-                with quelle.open("rb") as fh:   # bei jedem Versuch neu öffnen
-                    r = self._req("PUT", rel, data=fh, headers={"Content-Type": "application/octet-stream"})
+                # Kleinere Dateien ganz lesen: Bei Dateien, die iCloud erst nachlädt, stimmt sonst die
+                # angekündigte Größe nicht mit dem Gesendeten überein (Nextcloud antwortet dann 400).
+                if quelle.stat().st_size < 64 * 1024 * 1024:
+                    r = self._req("PUT", rel, data=quelle.read_bytes(),
+                                  headers={"Content-Type": "application/octet-stream"})
+                else:
+                    with quelle.open("rb") as fh:   # bei jedem Versuch neu öffnen
+                        r = self._req("PUT", rel, data=fh, headers={"Content-Type": "application/octet-stream"})
+                if r.status_code == 400 and versuch < 3:
+                    time.sleep(2 ** versuch)
+                    continue
                 break
             except NichtErreichbar:
                 if versuch == 3:

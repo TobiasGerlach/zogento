@@ -208,6 +208,10 @@ def _hochladen(lib: Library, dav, z: _Zustand, key: str, remote_dir, bericht: di
             continue
         known = z.dateien.get(rel, {}).get("etag")
         if remote_files and name in remote_files and remote_files[name].etag != known:
+            if dav.text(rel) == p.read_bytes():
+                # Gleicher Inhalt (z. B. nach abgebrochenem Lauf schon hochgeladen): kein Konflikt
+                z.merken(rel, p, remote_files[name].etag)
+                continue
             konflikt = f"{rel}.konflikt-{dateien.jetzt()}"
             dav.verschieben(rel, konflikt)
             bericht["konflikte"].append(konflikt)

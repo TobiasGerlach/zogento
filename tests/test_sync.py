@@ -187,3 +187,15 @@ def test_verbindungsabbruch_wird_wiederholt(monkeypatch, tmp_path):
     f.write_text("x")
     assert dav.ablegen(f, "titel/k/a.txt") == "e1"
     assert calls.count("PUT") == 3
+
+
+def test_abgebrochener_lauf_erzeugt_keine_scheinkonflikte(nas, rechner, tmp_path):
+    from bibliothek import config as cfg
+    with rechner("mac") as mac:
+        _neu(mac, tmp_path)
+        sync.abgleichen(mac, dav=nas)
+        # Abbruch simulieren: hochgeladen, aber Abgleichstand nie gespeichert
+        (cfg.sync_dir(mac.root) / "zustand.json").unlink()
+        b = sync.abgleichen(mac, dav=nas)
+        assert b["konflikte"] == []
+        assert not any(".konflikt-" in k for k in nas.files)
