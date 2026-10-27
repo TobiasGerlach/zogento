@@ -46,34 +46,44 @@ Programmordner (`~/Library/Application Support/Bibliothek/indizes`,
 So kann der Bibliotheksordner in iCloud, Nextcloud oder Syncthing liegen. Jeder
 Rechner baut seinen Index mit `bib index` selbst.
 
-## Nextcloud als Ablage (optional)
+## Speicherort: dieser Rechner, Nextcloud oder WebDAV (optional)
 
-Originale und OCR-Läufe können auf einer Nextcloud liegen statt auf dem Rechner.
-Lokal bleiben nur Katalog und Suchindex (wenige MB), deshalb funktionieren Suche,
-Lesen und KI auch ohne Verbindung. Originale werden beim Öffnen geholt und in
-einem Zwischenspeicher (höchstens 2 GB) gehalten. Der Katalog gleicht sich über
-die Nextcloud zwischen allen Rechnern ab.
+Standard ist **nur dieser Rechner** — alles liegt im Bibliotheksordner. Wer will,
+legt Originale und OCR-Läufe auf einen eigenen Server: eine Nextcloud oder einen
+anderen WebDAV-Server (ownCloud Infinite Scale, OpenCloud, Seafile, Apache/nginx,
+`rclone serve webdav`). Lokal bleiben nur Katalog und Suchindex (wenige MB), deshalb
+funktionieren Suche, Lesen und KI auch ohne Verbindung. Originale werden beim Öffnen
+geholt und in einem Zwischenspeicher (höchstens 2 GB) gehalten. Der Katalog gleicht
+sich über den Server zwischen allen Rechnern ab. Einstellen in der App unter
+Einstellungen → Speicherort oder per `bib nas`.
 
-**Eigener Benutzer.** Die Bibliothek nimmt kein Admin-Konto an. Lege in der
+**Nextcloud: eigener Benutzer.** Die Bibliothek nimmt kein Admin-Konto an. Lege in der
 Nextcloud einen eigenen Benutzer an (z. B. `bibliothek`, nicht in der Gruppe
 admin) — er sieht nichts von deinen anderen Dateien. Willst du den Eingang aus
 deinem eigenen Konto befüllen, gibt dieser Benutzer seinen Ordner `Bibliothek`
-für dich frei.
+für dich frei. Eine Nextcloud lässt sich nur über diesen Weg verbinden, nicht als
+„anderer WebDAV-Server“, damit die Admin-Prüfung nicht umgangen wird.
+
+**Anderer WebDAV-Server.** Adresse, Benutzer und Passwort; am besten ein Zugang,
+der nur diesen einen Ordner sieht. Unverschlüsseltes `http://` geht nur im Heimnetz.
+Weil einfache Server Ordner-ETags nicht mitändern, sieht der Abgleich dort jeden
+Titelordner an (etwas langsamer, sonst gleich).
 
 ```sh
-bib nas verbinden http://nas:9001 --ohne-browser   # Link in einem privaten Fenster öffnen, als dieser Benutzer anmelden
+bib nas verbinden http://nas:9001 --ohne-browser   # Nextcloud: Link in einem privaten Fenster öffnen, als dieser Benutzer anmelden
+bib nas verbinden https://server/dav --webdav --benutzer bib   # anderer WebDAV-Server, fragt das Passwort
 bib sync                                          # erster Abgleich = Umzug
 bib nas                                           # Status, Ausstehendes, Zwischenspeicher
 bib oeffne <citekey>                              # Original öffnen (holt es bei Bedarf)
-bib nas trennen                                   # Zugang löschen, auch auf der Nextcloud
+bib nas trennen                                   # Zugang löschen (bei Nextcloud auch auf dem Server)
 ```
 
-Auf der Nextcloud: `Bibliothek/titel/<citekey>/` (Katalog + Originale),
+Auf dem Server: `Bibliothek/titel/<citekey>/` (Katalog + Originale),
 `Bibliothek/ocr/<citekey>/` (Scans), `Bibliothek/Eingang/` — was dort liegt
 (Dateien oder ein Ordner mit Buchfotos), nimmt die App automatisch auf und
 entfernt es danach aus dem Eingang. Die App gleicht beim Start, alle 5 Minuten
-und nach Änderungen ab; ohne Verbindung bleibt alles vorgemerkt. Das App-Passwort
-liegt im Schlüsselbund des Systems.
+und nach Änderungen ab; ohne Verbindung bleibt alles vorgemerkt. Passwörter
+liegen im Schlüsselbund des Systems.
 
 ## Installation
 

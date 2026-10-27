@@ -17,9 +17,9 @@
 </section>
 
 <section class="karte" id="nas" data-nas-login="{{ url_for('api_nas_login') }}" data-login-status="{{ login.status }}">
-  <h2>NAS / Nextcloud</h2>
+  <h2>Speicherort</h2>
   {% if nas %}
-    <p><strong>Verbunden</strong> als <code>{{ nas.benutzer }}</code> @ <code>{{ nas.server }}</code>, Ordner <code>{{ nas.ordner or 'Bibliothek' }}</code>
+    <p><strong>{{ ablage_name }}</strong> — verbunden als <code>{{ nas.benutzer }}</code> @ <code>{{ nas.server }}</code>, Ordner <code>{{ nas.ordner or 'Bibliothek' }}</code>
       {% if nas_info.online is sameas false %}<span class="warnung">gerade nicht erreichbar</span>{% endif %}</p>
     <ul class="kennzahlen">
       <li>Letzter Abgleich: {{ nas_info.zuletzt or 'noch keiner' }}</li>
@@ -27,16 +27,16 @@
       <li>Zwischenspeicher auf diesem Rechner: {{ zwischenspeicher }}</li>
     </ul>
     {% if nas_info.meldung %}<p class="meldung hinweis">{{ nas_info.meldung }}</p>{% endif %}
-    {% if nas_info.konflikte %}<p class="meldung hinweis">Konflikte (die andere Fassung liegt auf der Nextcloud):
+    {% if nas_info.konflikte %}<p class="meldung hinweis">Konflikte (die andere Fassung liegt in der Ablage):
       {% for k in nas_info.konflikte %}<code>{{ k }}</code>{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
     {% if nas_info.fehler %}<p class="meldung fehler">Beim letzten Abgleich: {{ nas_info.fehler|join('; ') }}</p>{% endif %}
-    <p class="leise">Neue Literatur kannst du auch in der Nextcloud ablegen: Dateien oder Ordner mit Buchfotos nach
+    <p class="leise">Neue Literatur kannst du auch direkt in der Ablage ablegen: Dateien oder Ordner mit Buchfotos nach
       <code>{{ nas.ordner or 'Bibliothek' }}/Eingang</code> legen — die App nimmt sie automatisch auf.
       Originale und Scans liegen auf dem NAS und werden erst beim Öffnen geholt; Suche und Text gehen auch unterwegs.</p>
     <div class="reihe">
       <form method="post" action="{{ url_for('nas_abgleichen') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">Jetzt abgleichen</button></form>
       <form method="post" action="{{ url_for('nas_zwischenspeicher_leeren') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Zwischenspeicher leeren</button></form>
-      <form method="post" action="{{ url_for('nas_trennen') }}" data-bestaetigen="Verbindung zur Nextcloud trennen? Die Dateien auf dem NAS bleiben erhalten."><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="gefaehrlich">Trennen</button></form>
+      <form method="post" action="{{ url_for('nas_trennen') }}" data-bestaetigen="Verbindung trennen? Die Dateien in der Ablage bleiben erhalten."><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="gefaehrlich">Trennen</button></form>
     </div>
   {% elif login.status == 'wartet' %}
     <p class="meldung hinweis" data-login-warten>Diesen Link in einem <strong>privaten Fenster</strong> öffnen
@@ -46,7 +46,11 @@
     <form method="post" action="{{ url_for('nas_abbrechen') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="zweitrangig">Abbrechen</button></form>
   {% else %}
     {% if login.status == 'fehler' %}<p class="meldung fehler">{{ login.meldung }}</p>{% endif %}
-    <p>Mit einer Nextcloud liegen Originale und Scans auf dem NAS statt auf diesem Rechner. Hier bleiben nur Katalog und Suchindex (wenige MB); andere Rechner sehen dieselbe Bibliothek.</p>
+    <p><strong>Nur dieser Rechner</strong> — alles liegt in <code>{{ root }}</code>.</p>
+    <p>Mit einer eigenen Ablage (Nextcloud oder ein anderer WebDAV-Server) liegen Originale und Scans dort statt auf diesem
+      Rechner. Hier bleiben nur Katalog und Suchindex (wenige MB); andere Rechner sehen dieselbe Bibliothek.</p>
+    <details{% if login.status == 'fehler' %} open{% endif %}>
+    <summary>Nextcloud</summary>
     <form method="post" action="{{ url_for('nas_verbinden') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <div class="reihe">
@@ -59,6 +63,23 @@
         Danach erscheint hier ein Anmeldelink; das Passwort bleibt bei der Nextcloud, die App bekommt ein eigenes
         App-Passwort im Schlüsselbund dieses Rechners.</p>
     </form>
+    </details>
+    <details>
+    <summary>Anderer WebDAV-Server</summary>
+    <form method="post" action="{{ url_for('nas_webdav') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="feld"><span>WebDAV-Adresse</span><input name="url" placeholder="https://server/dav" required></label>
+      <div class="reihe">
+        <label class="feld"><span>Benutzer</span><input name="benutzer" autocomplete="username" required></label>
+        <label class="feld"><span>Passwort</span><input name="passwort" type="password" autocomplete="current-password" required></label>
+      </div>
+      <div class="knoepfe"><button type="submit">Verbinden</button></div>
+      <p class="leise">Für ownCloud Infinite Scale, OpenCloud, Seafile, einen eigenen Apache-/nginx-Server oder
+        <code>rclone serve webdav</code>. Am besten ein Zugang, der nur diesen einen Ordner sieht — die Bibliothek
+        kann das hier nicht prüfen. Darin legt sie den Ordner <code>Bibliothek</code> an. Das Passwort liegt im
+        Schlüsselbund dieses Rechners; unverschlüsseltes <code>http://</code> geht nur im Heimnetz.</p>
+    </form>
+    </details>
   {% endif %}
 </section>
 

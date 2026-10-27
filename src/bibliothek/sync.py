@@ -1,4 +1,4 @@
-"""Abgleich mit der Nextcloud.
+"""Abgleich mit der Ablage (Nextcloud oder anderer WebDAV-Server).
 
 Ein Durchlauf:
   1. vorgemerktes Umbenennen/Löschen auf der Nextcloud nachziehen
@@ -199,7 +199,7 @@ def _hochladen(lib: Library, dav, z: _Zustand, key: str, remote_dir, bericht: di
             bericht["hoch"] += 1
     # 3. Katalog
     remote_files = None
-    if remote_dir is not None and remote_dir.etag != z.ordner.get(key):
+    if remote_dir is not None and (not _ordner_etags(dav) or remote_dir.etag != z.ordner.get(key)):
         remote_files = {e.name: e for e in dav.liste(f"titel/{key}") or []}
     for name in dateien.KATALOG:
         p = folder / name
@@ -219,10 +219,15 @@ def _hochladen(lib: Library, dav, z: _Zustand, key: str, remote_dir, bericht: di
         bericht["hoch"] += 1
 
 
+def _ordner_etags(dav) -> bool:
+    """Ändert der Server Ordner-ETags mit dem Inhalt (Nextcloud)? Sonst jeden Titelordner ansehen."""
+    return getattr(dav, "ordner_etags", True)
+
+
 def _herunterladen(lib: Library, dav, z: _Zustand, bericht: dict, fortschritt: Fortschritt) -> None:
     remote = {e.name: e for e in (dav.liste("titel") or []) if e.ist_ordner}
     for key, entry in remote.items():
-        if entry.etag == z.ordner.get(key):
+        if _ordner_etags(dav) and entry.etag == z.ordner.get(key):
             continue
         files = {e.name: e for e in dav.liste(f"titel/{key}") or [] if not e.ist_ordner}
         folder = lib.folder(key)

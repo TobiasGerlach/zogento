@@ -17,3 +17,10 @@ def _lokale_programmdaten(tmp_path, monkeypatch):
     monkeypatch.setattr(ablage, "oeffnen", _kein_echtes_nas)
     monkeypatch.setattr(keyring, "get_password", lambda *a, **k: None)
     monkeypatch.setattr(keyring, "set_password", lambda *a, **k: None)
+
+    import requests
+
+    def _kein_netz(self, req, **kw):
+        raise AssertionError(f"Test wollte ins Netz ({req.method} {req.url}) — requests monkeypatchen")
+
+    monkeypatch.setattr(requests.Session, "send", _kein_netz)

@@ -268,7 +268,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
                 abgleich["zuletzt"] = time.time()
                 abgleich["meldung"] = ""
             elif status == "offline":
-                abgleich["meldung"] = "Nextcloud nicht erreichbar — Änderungen bleiben vorgemerkt."
+                abgleich["meldung"] = "Ablage nicht erreichbar — Änderungen bleiben vorgemerkt."
             abgleich["konflikte"] = list(bericht.get("konflikte") or [])
             abgleich["fehler"] = list(bericht.get("fehler") or [])
             for k in abgleich["konflikte"]:
@@ -282,7 +282,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
                 submit_embeddings()
             return {k: v for k, v in bericht.items() if k != "ausstehend"}
 
-        return jobs.submit("Abgleich mit der Nextcloud", run, art="abgleich", einmalig=True)
+        return jobs.submit("Abgleich mit der Ablage", run, art="abgleich", einmalig=True)
 
     def schedule_sync(delay: float = ABGLEICH_VERZOEGERUNG) -> None:
         """Abgleich kurz nach einer Änderung; weitere Änderungen verschieben ihn (debounce)."""
@@ -530,10 +530,10 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
 
     def nas_fehlerseite(exc: Exception):
         if isinstance(exc, ablage.NichtErreichbar):
-            meldung = ("Nextcloud nicht erreichbar — die Datei liegt auf dem NAS. Im Heimnetz erneut versuchen. "
+            meldung = ("Ablage nicht erreichbar — die Datei liegt dort. Im Heimnetz erneut versuchen. "
                        "Suche und Text funktionieren auch ohne Verbindung.")
             return render_template("fehler.html", code=503, meldung=meldung), 503
-        return render_template("fehler.html", code=502, meldung=f"Nextcloud: {exc}"), 502
+        return render_template("fehler.html", code=502, meldung=f"Ablage: {exc}"), 502
 
     @app.get("/titel/<key>/datei/<path:name>")
     def datei(key, name):
@@ -543,7 +543,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         try:
             path = dateien.original(lib, item, name)
         except FileNotFoundError:
-            abort(404, "Datei nicht gefunden — weder lokal noch auf der Nextcloud.")
+            abort(404, "Datei nicht gefunden — weder lokal noch in der Ablage.")
         except ablage.AblageFehler as exc:
             return nas_fehlerseite(exc)
         resp = send_file(path, as_attachment=bool(request.args.get("laden")), download_name=name)
@@ -798,6 +798,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
                                sprache=config.ocr_language(), stats=st, bib=bib_executable(),
                                windows=sys.platform == "win32", on_path=on_path,
                                settings_file=config.SETTINGS_FILE, nas=nas, nas_info=info, login=login,
+                               ablage_name=ablage.anzeigename(nas or {}),
                                zwischenspeicher=_mb(dateien.zwischenspeicher_groesse()))
 
     @app.post("/einstellungen")
@@ -889,6 +890,23 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         threading.Thread(target=warten, name="bibliothek-login", daemon=True).start()
         return redirect(url_for("einstellungen") + "#nas")
 
+    @app.post("/nas/webdav")
+    def nas_webdav():
+        f = request.form
+        url, benutzer, passwort = f.get("url", "").strip(), f.get("benutzer", "").strip(), f.get("passwort", "")
+        if not (url and benutzer and passwort):
+            flash("Adresse, Benutzer und Passwort angeben.", "fehler")
+            return redirect(url_for("einstellungen") + "#nas")
+        try:
+            nas = ablage.verbinden_webdav(url, benutzer, passwort)
+        except ablage.AblageFehler as exc:
+            flash(str(exc), "fehler")
+            return redirect(url_for("einstellungen") + "#nas")
+        abgleich.update(online=True, meldung="", ausstehend=None)
+        submit_sync("neu verbunden")
+        flash(f"Verbunden als {nas['benutzer']} @ {nas['server']}. Der erste Abgleich lädt Originale und Scans hoch.", "ok")
+        return redirect(url_for("einstellungen") + "#nas")
+
     @app.post("/nas/abbrechen")
     def nas_abbrechen():
         login["abbrechen"] = True
@@ -904,7 +922,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
     def nas_abgleichen():
         job = submit_sync("von Hand")
         if not job:
-            flash("Keine Nextcloud verbunden.", "fehler")
+            flash("Keine Ablage verbunden.", "fehler")
             return redirect(url_for("einstellungen") + "#nas")
         return redirect(url_for("job_seite", job_id=job.id))
 
@@ -913,7 +931,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         ablage.trennen()
         login.update(status="", meldung="", url="")
         abgleich.update(online=None, zuletzt=None, ausstehend=None, meldung="", konflikte=[], fehler=[])
-        flash("Nextcloud getrennt. Dateien auf dem NAS bleiben erhalten; Originale, die nur dort liegen, "
+        flash("Getrennt. Dateien in der Ablage bleiben erhalten; Originale, die nur dort liegen, "
               "sind ohne Verbindung nicht zu öffnen.", "ok")
         return redirect(url_for("einstellungen") + "#nas")
 

@@ -106,7 +106,7 @@ def test_original_kommt_vom_nas(client, verbunden, dav):
     r = client.get("/titel/hurlbert2023drowning/datei/hurlbert.pdf")
     assert r.status_code == 200 and r.data == b"%PDF-1.4 vom NAS"
     html = client.get("/titel/hurlbert2023drowning").get_data(as_text=True)
-    assert "auf der Nextcloud" in html
+    assert "in der Ablage" in html
 
 
 def test_original_offline_freundliche_seite(client, verbunden, dav):
@@ -114,7 +114,7 @@ def test_original_offline_freundliche_seite(client, verbunden, dav):
     r = client.get("/titel/hurlbert2023drowning/datei/hurlbert.pdf")
     assert r.status_code == 503
     html = r.get_data(as_text=True)
-    assert "Nextcloud nicht erreichbar" in html and "Traceback" not in html
+    assert "Ablage nicht erreichbar" in html and "Traceback" not in html
 
 
 def test_ocr_pruefansicht_vom_nas(client, verbunden, dav, lib):
@@ -130,10 +130,10 @@ def test_ocr_pruefansicht_vom_nas(client, verbunden, dav, lib):
 
 def test_einstellungen_verbunden_und_getrennt(client, verbunden):
     html = client.get("/einstellungen").get_data(as_text=True)
-    assert "Verbunden" in html and "tobias" in html and "Eingang" in html and "Jetzt abgleichen" in html
+    assert "verbunden als" in html and "tobias" in html and "Eingang" in html and "Jetzt abgleichen" in html
     r = post(client, "/nas/trennen", follow_redirects=True)
     html = r.get_data(as_text=True)
-    assert "Nextcloud getrennt" in html and "Mit Nextcloud verbinden" in html
+    assert "Getrennt" in html and "Mit Nextcloud verbinden" in html and "Nur dieser Rechner" in html
 
 
 def test_abgleich_job_laedt_hoch(client, runner, verbunden, dav):
@@ -161,7 +161,7 @@ def test_abgleich_offline_zeigt_status(client, runner, verbunden, dav):
 def test_abgleich_ohne_nas(client, monkeypatch):
     monkeypatch.setattr(ablage, "verbunden", lambda: False)
     r = post(client, "/nas/abgleichen", follow_redirects=True)
-    assert "Keine Nextcloud verbunden" in r.get_data(as_text=True)
+    assert "Keine Ablage verbunden" in r.get_data(as_text=True)
 
 
 def test_anmeldung_ueber_browser(client, runner, monkeypatch, dav, tmp_path):
@@ -198,7 +198,7 @@ def test_anmeldung_ueber_browser(client, runner, monkeypatch, dav, tmp_path):
         time.sleep(0.05)
     assert client.get("/api/nas/login").get_json()["status"] == "verbunden"
     runner.wait(10)   # anschließender erster Abgleich
-    assert "Verbunden" in client.get("/einstellungen").get_data(as_text=True)
+    assert "verbunden als" in client.get("/einstellungen").get_data(as_text=True)
 
 
 def test_anmeldung_server_nicht_erreichbar(client, monkeypatch):
@@ -209,3 +209,26 @@ def test_anmeldung_server_nicht_erreichbar(client, monkeypatch):
     monkeypatch.setattr(ablage, "login_starten", kaputt)
     r = post(client, "/nas/verbinden", {"server": "http://10.0.0.1:9001"}, follow_redirects=True)
     assert "nicht erreichbar" in r.get_data(as_text=True)
+
+
+def test_webdav_verbinden(client, monkeypatch):
+    aufrufe = []
+
+    def verbinden_webdav(url, benutzer, passwort, **kw):
+        aufrufe.append((url, benutzer, passwort))
+        if "example.org" in url:
+            raise ablage.AblageFehler("Unverschlüsseltes http nur im Heimnetz")
+        return {"art": "webdav", "server": url, "benutzer": benutzer, "ordner": "Bibliothek"}
+
+    monkeypatch.setattr(ablage, "verbinden_webdav", verbinden_webdav)
+    seite = client.get("/einstellungen").get_data(as_text=True)
+    assert "Anderer WebDAV-Server" in seite and "Nur dieser Rechner" in seite
+    r = post(client, "/nas/webdav", {"url": "http://dav.example.org", "benutzer": "bib", "passwort": "pw"},
+             follow_redirects=True)
+    assert "nur im Heimnetz" in r.get_data(as_text=True)
+    r = post(client, "/nas/webdav", {"url": "https://dav.local/dav", "benutzer": "bib", "passwort": ""},
+             follow_redirects=True)
+    assert "Passwort angeben" in r.get_data(as_text=True) and len(aufrufe) == 1
+    r = post(client, "/nas/webdav", {"url": "http://192.168.0.5/dav", "benutzer": "bib", "passwort": "pw"},
+             follow_redirects=True)
+    assert "Verbunden als bib" in r.get_data(as_text=True)

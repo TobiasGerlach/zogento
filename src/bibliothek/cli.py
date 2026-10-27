@@ -486,15 +486,29 @@ def cmd_nas(args) -> int:
 
     if args.aktion == "verbinden":
         if not args.server:
-            print("Server angeben, z. B.: bib nas verbinden http://192.168.0.70:9001", file=sys.stderr)
+            print("Server angeben, z. B.: bib nas verbinden http://192.168.0.70:9001\n"
+                  "  oder für einen anderen WebDAV-Server: bib nas verbinden https://server/dav --webdav --benutzer NAME",
+                  file=sys.stderr)
             return 2
-        nas = ablage.verbinden(args.server, ordner=args.ordner, browser=not args.ohne_browser)
+        try:
+            if args.webdav:
+                if not args.benutzer:
+                    print("Mit --webdav auch --benutzer angeben.", file=sys.stderr)
+                    return 2
+                import getpass
+                passwort = getpass.getpass(f"Passwort für {args.benutzer}: ")
+                nas = ablage.verbinden_webdav(args.server, args.benutzer, passwort, ordner=args.ordner)
+            else:
+                nas = ablage.verbinden(args.server, ordner=args.ordner, browser=not args.ohne_browser)
+        except ablage.AblageFehler as exc:
+            print(exc, file=sys.stderr)
+            return 1
         print(f"Verbunden als {nas['benutzer']} @ {nas['server']}, Ordner „{nas['ordner']}“.")
         print("Erster Abgleich: bib sync   (lädt Originale und OCR-Läufe hoch, kann dauern)")
         return 0
     if args.aktion == "trennen":
         ablage.trennen()
-        print("Getrennt. Dateien auf der Nextcloud bleiben, wo sie sind.")
+        print("Getrennt. Dateien in der Ablage bleiben, wo sie sind.")
         return 0
     lib = _lib()
     st = sync.status(lib)
@@ -502,7 +516,7 @@ def cmd_nas(args) -> int:
         print("Kein NAS eingerichtet — alles liegt lokal. Einrichten: bib nas verbinden <server>")
         return 0
     import datetime as _dt
-    print(f"Nextcloud:    {st['nas']['benutzer']} @ {st['nas']['server']}, Ordner {st['nas'].get('ordner')}")
+    print(f"{ablage.anzeigename(st['nas']) + ':':<14}{st['nas']['benutzer']} @ {st['nas']['server']}, Ordner {st['nas'].get('ordner')}")
     print("Letzter Abgleich: " + (_dt.datetime.fromtimestamp(st["zuletzt"]).strftime("%d.%m.%Y %H:%M") if st["zuletzt"] else "noch nie"))
     a = st["ausstehend"]
     print(f"Ausstehend:   {a['originale']} Originale ({a['bytes'] / 1e6:.0f} MB), OCR-Läufe: {', '.join(a['ocr']) or '–'}")
@@ -520,19 +534,19 @@ def cmd_sync(args) -> int:
         print(exc, file=sys.stderr)
         return 1
     except ablage.NichtErreichbar:
-        print("Verbindung zur Nextcloud unterbrochen. Bisheriges ist gesichert — `bib sync` macht dort weiter.",
+        print("Verbindung zur Ablage unterbrochen. Bisheriges ist gesichert — `bib sync` macht dort weiter.",
               file=sys.stderr)
         return 1
     if b["status"] != "ok":
         print({"kein NAS": "Kein NAS eingerichtet (bib nas verbinden <server>).",
-               "offline": "Nextcloud nicht erreichbar — Änderungen bleiben vorgemerkt."}[b["status"]])
+               "offline": "Ablage nicht erreichbar — Änderungen bleiben vorgemerkt."}[b["status"]])
         return 1
     print(f"Abgleich: {b['hoch']} hochgeladen, {b['runter']} geholt"
           + (f", aktualisiert: {', '.join(b['geholt'])}" if b["geholt"] else ""))
     for line in b["eingang"]:
         print(f"  Eingang: {line}")
     for k in b["konflikte"]:
-        print(f"  ! Konflikt — andere Fassung liegt auf der Nextcloud als {k}")
+        print(f"  ! Konflikt — andere Fassung liegt in der Ablage als {k}")
     for f in b["fehler"]:
         print(f"  ! {f}")
     if (b["geholt"] or b["eingang"]) and not args.ohne_embeddings:
@@ -698,14 +712,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ocr-sprache", help="Tesseract-Codes, z. B. eng+deu, deu_latf für Fraktur")
     s.set_defaults(func=cmd_einstellung)
 
-    s = sub.add_parser("nas", help="Nextcloud als Ablage: verbinden, status, trennen")
+    s = sub.add_parser("nas", help="Nextcloud oder WebDAV-Server als Ablage: verbinden, status, trennen")
     s.add_argument("aktion", choices=["verbinden", "status", "trennen"], nargs="?", default="status")
-    s.add_argument("server", nargs="?", help="z. B. http://192.168.0.70:9001")
-    s.add_argument("--ordner", default="Bibliothek", help="Ordner in der Nextcloud (Standard: Bibliothek)")
+    s.add_argument("server", nargs="?", help="Nextcloud-Adresse, z. B. http://192.168.0.70:9001, oder WebDAV-Adresse")
+    s.add_argument("--webdav", action="store_true", help="anderer WebDAV-Server statt Nextcloud (fragt das Passwort)")
+    s.add_argument("--benutzer", help="mit --webdav: Benutzername")
+    s.add_argument("--ordner", default="Bibliothek", help="Ordner in der Ablage (Standard: Bibliothek)")
     s.add_argument("--ohne-browser", action="store_true", help="Login-Link nur anzeigen")
     s.set_defaults(func=cmd_nas)
 
-    s = sub.add_parser("sync", help="mit der Nextcloud abgleichen (inkl. Eingangsordner)")
+    s = sub.add_parser("sync", help="mit der Ablage abgleichen (inkl. Eingangsordner)")
     s.add_argument("--ohne-eingang", action="store_true")
     s.add_argument("--ohne-embeddings", action="store_true")
     s.set_defaults(func=cmd_sync)

@@ -14,7 +14,8 @@ _zaehler = itertools.count(1)
 
 
 class FakeDAV:
-    def __init__(self):
+    def __init__(self, ordner_etags: bool = True):
+        self.ordner_etags = ordner_etags   # False: wie ein einfacher WebDAV-Server, Ordner-ETags bleiben gleich
         self.files: dict[str, tuple[bytes, str, float]] = {}   # rel → (inhalt, etag, zeit)
         self.dirs: dict[str, str] = {"": "d0"}                 # rel → etag
         self.online = True
@@ -30,6 +31,8 @@ class FakeDAV:
         return str(PurePosixPath(rel)).strip("/") if rel not in ("", ".") else ""
 
     def _touch(self, rel: str):
+        if not self.ordner_etags:
+            return
         parts = PurePosixPath(rel).parts
         for i in range(len(parts)):
             d = "/".join(parts[:i])
@@ -83,7 +86,7 @@ class FakeDAV:
         for i in range(len(parts)):
             d = "/".join(parts[:i + 1])
             if d not in self.dirs:
-                self.dirs[d] = f"d{next(_zaehler)}"
+                self.dirs[d] = f"d{next(_zaehler)}" if self.ordner_etags else "d"
                 self._touch(d)
 
     def ablegen(self, quelle: Path, rel: str) -> str:

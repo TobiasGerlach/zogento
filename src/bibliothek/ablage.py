@@ -1,16 +1,20 @@
-"""Entfernte Ablage auf einer Nextcloud (WebDAV).
+"""Entfernte Ablage über WebDAV: Nextcloud oder ein anderer WebDAV-Server.
 
 Aufbau dort, unter <WebDAV-Wurzel>/<ordner>/:
     titel/<citekey>/    meta.yaml, seiten.jsonl, notizen.md und die Originaldateien
     ocr/<citekey>/      OCR-Läufe (Buchfotos, Seitenbilder, review.html)
     Eingang/            Ablage zum Aufnehmen (Dateien oder Ordner mit Buchfotos)
 
-Die Anmeldung läuft über den Nextcloud-Login im Browser (Login Flow v2); das
-App-Passwort liegt im Schlüsselbund des Systems (keyring), nie in einer Datei.
+Nextcloud: Anmeldung über den Login im Browser (Login Flow v2), Admin-Konten werden
+abgelehnt. Andere WebDAV-Server (ownCloud Infinite Scale, OpenCloud, Seafile, Apache,
+nginx, rclone serve …): Adresse, Benutzer und Passwort. Passwörter liegen im
+Schlüsselbund des Systems (keyring), nie in einer Datei.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import time
 import urllib.parse
 import webbrowser
@@ -47,10 +51,19 @@ class Eintrag:
 
 
 class WebDAV:
-    def __init__(self, server: str, benutzer: str, passwort: str, ordner: str = "Bibliothek"):
+    """art="nextcloud": server ist die Nextcloud-Adresse. art="webdav": server ist die WebDAV-Adresse selbst."""
+
+    def __init__(self, server: str, benutzer: str, passwort: str, ordner: str = "Bibliothek", *,
+                 art: str = "nextcloud"):
         self.server = server.rstrip("/")
         self.benutzer = benutzer
-        self.base = f"{self.server}/remote.php/dav/files/{urllib.parse.quote(benutzer)}/{ordner.strip('/')}"
+        self.art = art
+        wurzel = (f"{self.server}/remote.php/dav/files/{urllib.parse.quote(benutzer)}" if art == "nextcloud"
+                  else self.server)
+        self.base = f"{wurzel}/{ordner.strip('/')}"
+        # Nextcloud ändert das ETag eines Ordners, sobald sich darin etwas ändert; der Abgleich kann dann
+        # unveränderte Titel überspringen. Andere Server garantieren das nicht.
+        self.ordner_etags = art == "nextcloud"
         self.s = requests.Session()
         self.s.auth = (benutzer, passwort)
         self.s.headers["User-Agent"] = "Bibliothek"
@@ -75,10 +88,10 @@ class WebDAV:
                 break
             except (requests.ConnectionError, requests.Timeout) as exc:
                 if versuch == versuche - 1:
-                    raise NichtErreichbar(f"Nextcloud nicht erreichbar ({self.server})") from exc
+                    raise NichtErreichbar(f"Ablage nicht erreichbar ({self.server})") from exc
                 time.sleep(2 ** versuch)
         if r.status_code == 401:
-            raise AblageFehler("Nextcloud lehnt die Anmeldung ab — neu verbinden (bib nas verbinden).")
+            raise AblageFehler("Die Ablage lehnt die Anmeldung ab — neu verbinden (bib nas verbinden).")
         return r
 
     def erreichbar(self) -> bool:
@@ -108,11 +121,12 @@ class WebDAV:
             prop = resp.find(f"{DAV}propstat/{DAV}prop")
             is_dir = prop.find(f"{DAV}resourcetype/{DAV}collection") is not None
             mod = prop.findtext(DAV + "getlastmodified")
-            out.append(Eintrag(
-                name=href.rsplit("/", 1)[-1], ist_ordner=is_dir,
-                groesse=int(prop.findtext(DAV + "getcontentlength") or 0),
-                etag=(prop.findtext(DAV + "getetag") or "").strip('"'),
-                geaendert=parsedate_to_datetime(mod).timestamp() if mod else 0.0))
+            groesse = int(prop.findtext(DAV + "getcontentlength") or 0)
+            geaendert = parsedate_to_datetime(mod).timestamp() if mod else 0.0
+            # Server ohne ETags (z. B. nginx): Größe + Änderungszeit als Ersatz
+            etag = (prop.findtext(DAV + "getetag") or "").strip('"').removeprefix('W/"') or f"{groesse}-{geaendert:.0f}"
+            out.append(Eintrag(name=href.rsplit("/", 1)[-1], ist_ordner=is_dir, groesse=groesse,
+                               etag=etag, geaendert=geaendert))
         return out
 
     def info(self, rel: str) -> Eintrag | None:
@@ -175,8 +189,9 @@ class WebDAV:
                 time.sleep(2 ** versuch)
         if r.status_code not in (200, 201, 204):
             raise AblageFehler(f"PUT {rel}: HTTP {r.status_code}")
-        etag = (r.headers.get("OC-ETag") or r.headers.get("ETag") or "").strip('"')
-        if not etag:
+        etag = (r.headers.get("OC-ETag") or r.headers.get("ETag") or "").strip('"').removeprefix('W/"')
+        if not etag or self.art != "nextcloud":
+            # Andere Server melden beim PUT oft kein oder ein anderes ETag als beim Auflisten
             e = self.info(rel)
             etag = e.etag if e else ""
         return etag
@@ -233,8 +248,14 @@ def oeffnen() -> WebDAV | None:
 
     passwort = keyring.get_password(KEYRING_SERVICE, f"{nas['benutzer']}@{nas['server']}")
     if not passwort:
-        raise AblageFehler("Kein Nextcloud-Passwort im Schlüsselbund — neu verbinden (bib nas verbinden).")
-    return WebDAV(nas["server"], nas["benutzer"], passwort, nas.get("ordner", "Bibliothek"))
+        raise AblageFehler("Kein Passwort für die Ablage im Schlüsselbund — neu verbinden (bib nas verbinden).")
+    return WebDAV(nas["server"], nas["benutzer"], passwort, nas.get("ordner", "Bibliothek"),
+                  art=nas.get("art", "nextcloud"))
+
+
+def anzeigename(nas: dict | None = None) -> str:
+    nas = einstellungen() if nas is None else nas
+    return "Nextcloud" if nas.get("art", "nextcloud") == "nextcloud" else "WebDAV-Server"
 
 
 def login_starten(server: str) -> dict:
@@ -272,7 +293,7 @@ def login_abwarten(flow: dict, *, ordner: str = "Bibliothek", timeout: float = 6
                     "Benutzer nur für die Bibliothek anlegen (z. B. „bibliothek“) und mit dem verbinden. "
                     "Das eben erzeugte App-Passwort wurde wieder gelöscht.")
             keyring.set_password(KEYRING_SERVICE, f"{d['loginName']}@{server}", d["appPassword"])
-            nas = {"server": server, "benutzer": d["loginName"], "ordner": ordner,
+            nas = {"art": "nextcloud", "server": server, "benutzer": d["loginName"], "ordner": ordner,
                    "bibliothek": str(config.library_root().resolve())}
             config.save_settings({"nas": nas})
             return nas
@@ -313,6 +334,64 @@ def verbinden(server: str, *, ordner: str = "Bibliothek", browser: bool = True,
     return login_abwarten(flow, ordner=ordner)
 
 
+def verbinden_webdav(url: str, benutzer: str, passwort: str, *, ordner: str = "Bibliothek") -> dict:
+    """Allgemeiner WebDAV-Server: Zugang prüfen, Ordner anlegen, Passwort in den Schlüsselbund."""
+    import keyring
+
+    url = url.strip().rstrip("/")
+    teile = urllib.parse.urlparse(url)
+    if teile.scheme not in ("http", "https") or not teile.hostname:
+        raise AblageFehler("WebDAV-Adresse wie https://server/dav angeben.")
+    if teile.scheme == "http" and not _im_heimnetz(teile.hostname):
+        raise AblageFehler("Unverschlüsseltes http nur im Heimnetz — außerhalb würde das Passwort lesbar "
+                           "übertragen. Bitte https verwenden.")
+    if _ist_nextcloud(url):
+        # Sonst ließe sich die Admin-Sperre umgehen: Nextcloud nur über den eigenen Login
+        raise AblageFehler("Das ist eine Nextcloud bzw. ownCloud — bitte „Nextcloud“ wählen. Dort prüft die "
+                           "Bibliothek, dass kein Admin-Konto verwendet wird.")
+    dav = WebDAV(url, benutzer, passwort, ordner, art="webdav")
+    try:
+        r = dav.s.request("PROPFIND", url + "/", headers={"Depth": "0"}, timeout=(3, 15))
+    except requests.RequestException as exc:
+        raise NichtErreichbar(f"{url} nicht erreichbar") from exc
+    if r.status_code == 401:
+        raise AblageFehler("Benutzer oder Passwort falsch.")
+    if r.status_code != 207:
+        raise AblageFehler(f"{url} antwortet nicht wie ein WebDAV-Server (HTTP {r.status_code}).")
+    dav.mkdirs("")
+    keyring.set_password(KEYRING_SERVICE, f"{benutzer}@{url}", passwort)
+    nas = {"art": "webdav", "server": url, "benutzer": benutzer, "ordner": ordner,
+           "bibliothek": str(config.library_root().resolve())}
+    config.save_settings({"nas": nas})
+    return nas
+
+
+def _im_heimnetz(host: str) -> bool:
+    try:
+        adressen = {ai[4][0] for ai in socket.getaddrinfo(host, None)}
+    except OSError:
+        return False
+    return bool(adressen) and all(ipaddress.ip_address(a.split("%")[0]).is_private for a in adressen)
+
+
+def _ist_nextcloud(url: str) -> bool:
+    if "/remote.php/" in url:
+        return True
+    teile = urllib.parse.urlparse(url)
+    pfad = teile.path
+    # status.php liegt im Nextcloud-Wurzelverzeichnis; die WebDAV-Adresse kann darunter liegen
+    kandidaten = {f"{teile.scheme}://{teile.netloc}{pfad[:i]}/status.php"
+                  for i in [0] + [j for j, c in enumerate(pfad) if c == "/"]}
+    for k in kandidaten:
+        try:
+            r = requests.get(k, timeout=(3, 10), headers={"User-Agent": "Bibliothek"})
+            if r.status_code == 200 and "installed" in r.json():
+                return True
+        except (requests.RequestException, ValueError):
+            continue
+    return False
+
+
 def trennen() -> None:
     import keyring
 
@@ -320,7 +399,7 @@ def trennen() -> None:
     if nas.get("server"):
         key = f"{nas['benutzer']}@{nas['server']}"
         passwort = keyring.get_password(KEYRING_SERVICE, key)
-        if passwort:
+        if passwort and nas.get("art", "nextcloud") == "nextcloud":
             _widerrufen(nas["server"], nas["benutzer"], passwort)   # auch auf der Nextcloud ungültig machen
         try:
             keyring.delete_password(KEYRING_SERVICE, key)
