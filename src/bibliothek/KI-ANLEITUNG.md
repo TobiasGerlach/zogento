@@ -53,6 +53,12 @@ Für Suchen und Lesen braucht es das nicht — Text und Seiten sind immer lokal.
 | `S. 45? (Scan 57, Seitenzahl geschätzt)` | automatisch geschätzt | **nein** — erst prüfen lassen |
 | `Scan 57 (Druckseite ungeklärt)` | Druckseite unbekannt | **nein** |
 | `Abschn. 3` | Format ohne Seiten (Word, HTML, EPUB) | Seitenzahl aus anderer Quelle |
+| `Sp. 245 (PDF-S. 3, Spalte 2/4)` | Lexikon mit Spaltenzählung | ja, wenn ohne `?` |
+
+Bei kopierten Büchern zeigt eine PDF-Seite oft eine Doppelseite. Solche Titel sind
+geteilt: jede Druckseite ist ein eigener Abschnitt, die Klammer nennt die Stelle im
+PDF („S. 19 (PDF-S. 10 rechts)“). Steigt die Zählung in einem Text pro Scan um 2,
+ist er noch ungeteilt — den Menschen bitten: `bib teilen <citekey> doppelseiten`.
 
 Keine Seitenzahl erfinden oder aus Scan-Nummern ableiten. Unsichere Stellen als
 offen markieren und den Menschen bitten: `bib seiten <citekey>` zeigt die

@@ -18,6 +18,9 @@ Läuft auf macOS, Ubuntu und Windows als App (Fenster) und als Kommandozeile `bi
 - **Seitenzahlen:** Druckseiten werden aus Kopf-/Fußzeilen geschätzt, abschnittsweise
   (fehlende oder doppelte Scans werden erkannt und gemeldet). Geschätzte Seiten sind
   mit `?` markiert, bis sie bestätigt sind.
+- **Doppelseiten und Spalten:** Kopierte Bücher mit einer Doppelseite pro PDF-Seite werden
+  erkannt und am Bund getrennt (auch gedreht), Lexika mit Spaltenzählung als „Sp.“
+  (`bib teilen <citekey> doppelseiten|spalten|doppelseiten-spalten`).
 - **Ordnen:** Tags, Kategorien (hierarchisch, `AT/Propheten`), Projekte, Notizen.
 - **Suche:** SQLite-Volltext (Präfixsuche, Phrasen, OR/NOT) plus semantische Suche
   (Qwen3-Embedding-0.6B, mehrsprachig), kombiniert per Reciprocal Rank Fusion.
