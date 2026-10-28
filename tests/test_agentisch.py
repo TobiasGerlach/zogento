@@ -268,11 +268,18 @@ def test_scanbild_aus_pdf(tmp_path):
 
 
 @pytest.fixture
-def client(lib, monkeypatch):
+def runner():
+    r = JobRunner()
+    yield r
+    r.wait(30)   # kein Job darf das Testende überleben (danach gelten wieder die echten Einstellungen)
+
+
+@pytest.fixture
+def client(lib, runner, monkeypatch):
     from bibliothek import ablage, index
     monkeypatch.setattr(ablage, "verbunden", lambda: False)
     monkeypatch.setattr(index, "embed_missing", lambda *a, **k: 0)
-    app = web.create_app(lib, runner=JobRunner())
+    app = web.create_app(lib, runner=runner)
     app.config["TESTING"] = True
     c = app.test_client()
     with c.session_transaction() as s:
@@ -291,11 +298,15 @@ def test_pruefliste_und_katalogseite(client, lib, kataloge):
     assert lib.get("bosch2011ganzheitliche").felder["publisher"] == "Francke"
 
 
-def test_sicherung_aus_den_einstellungen(client, tmp_path):
+def test_sicherung_aus_den_einstellungen(client, runner, tmp_path):
     html = client.get("/einstellungen").get_data(as_text=True)
     assert "Noch keine Sicherung" in html
     r = client.post("/sicherung", data={"csrf": TOKEN, "ziel": str(tmp_path / "platte")})
     assert r.status_code == 302 and "/jobs/" in r.headers["Location"]
+    runner.wait(30)
+    job = runner.all()[0]
+    assert job.status == "fertig" and "Gesichert nach" in job.ergebnis["meldung"]
+    assert sicherung.status()["ziel"] == str(tmp_path / "platte")
 
 
 def test_umbenennen_behaelt_embeddings(lib):
