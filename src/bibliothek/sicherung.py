@@ -135,5 +135,6 @@ def status() -> dict:
     s = config.settings().get("sicherung") or {}
     zuletzt = s.get("zuletzt")
     tage = (time.time() - zuletzt) / 86400 if zuletzt else None
-    return {"ziel": s.get("ziel"), "zuletzt": zuletzt, "tage": tage,
-            "faellig": tage is None or tage > ERINNERN_NACH_TAGEN}
+    extern = bool(s.get("extern"))   # die Ablage (NAS) wird schon anderweitig gesichert: nicht erinnern
+    return {"ziel": s.get("ziel"), "zuletzt": zuletzt, "tage": tage, "extern": extern,
+            "faellig": not extern and (tage is None or tage > ERINNERN_NACH_TAGEN)}

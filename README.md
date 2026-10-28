@@ -13,7 +13,8 @@ Läuft auf macOS, Ubuntu und Windows als App (Fenster) und als Kommandozeile `bi
   OpenDocument, RTF, EPUB, HTML, TXT/Markdown/TeX, PowerPoint, Bilder.
 - **OCR:** Seiten ohne Text werden automatisch erkannt. Buchfotos mit Doppelseiten
   (auch als Immich-Album) trennt das eingebaute Buch-OCR in Einzelseiten.
-  Apple Vision auf dem Mac, Tesseract auf Linux/Windows. Alles lokal.
+  Apple Vision auf dem Mac, Tesseract auf Linux/Windows; umschaltbar auf nur Open Source
+  (`bib einstellung --ocr-engine tesseract`). Alles lokal.
 - **Seitenzahlen:** Druckseiten werden aus Kopf-/Fußzeilen geschätzt, abschnittsweise
   (fehlende oder doppelte Scans werden erkannt und gemeldet). Geschätzte Seiten sind
   mit `?` markiert, bis sie bestätigt sind.
@@ -116,7 +117,8 @@ bib sicherung /Volumes/Platte/Bibliothek    # danach reicht: bib sicherung
 
 Die Sicherung ist selbst eine vollständige Bibliothek (öffnen mit `bib einstellung --bibliothek …`).
 Mit Ablage werden Originale und Scans von dort geholt. Gelöscht wird in der Sicherung nie etwas.
-`bib status` und die App erinnern nach zwei Wochen.
+`bib status` und die App erinnern nach zwei Wochen — außer die Ablage wird schon anderweitig gesichert
+(`bib einstellung --sicherung-extern ja`, z. B. wenn das NAS selbst sichert).
 
 ## Installation
 

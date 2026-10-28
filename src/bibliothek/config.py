@@ -63,6 +63,15 @@ def ocr_language() -> str:
     return _get("BIBLIOTHEK_OCR_SPRACHE", "ocr_sprache", "eng+deu")
 
 
+OCR_ENGINES = ("auto", "vision", "tesseract")
+
+
+def ocr_engine() -> str:
+    """auto = Apple Vision auf dem Mac (beste Erkennung), sonst Tesseract; tesseract = nur Open Source."""
+    wert = _get("BIBLIOTHEK_OCR_ENGINE", "ocr_engine", "auto")
+    return wert if wert in OCR_ENGINES else "auto"
+
+
 def web_port() -> int:
     return int(_get("BIBLIOTHEK_PORT", "port", 8777))
 

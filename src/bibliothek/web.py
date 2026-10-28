@@ -901,7 +901,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
                     "online": abgleich["online"], "meldung": abgleich["meldung"], "konflikte": abgleich["konflikte"],
                     "fehler": abgleich["fehler"]}
         return render_template("einstellungen.html", settings=config.settings(), root=lib.root,
-                               sprache=config.ocr_language(), stats=st, bib=bib_executable(),
+                               sprache=config.ocr_language(), engine=config.ocr_engine(), stats=st, bib=bib_executable(),
                                windows=sys.platform == "win32", on_path=on_path,
                                settings_file=config.SETTINGS_FILE, nas=nas, nas_info=info, login=login,
                                ablage_name=ablage.anzeigename(nas or {}), sicherung=_sicherung_info(),
@@ -911,6 +911,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
     def einstellungen_speichern():
         root = request.form.get("bibliothek", "").strip()
         sprache = request.form.get("ocr_sprache", "").strip()
+        engine = request.form.get("ocr_engine", "")
         if sprache and not re.fullmatch(r"[A-Za-z_]+(\+[A-Za-z_]+)*", sprache):
             flash("OCR-Sprache wie eng+deu angeben.", "fehler")
             return redirect(url_for("einstellungen"))
@@ -919,6 +920,8 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
             values["bibliothek"] = str(Path(root).expanduser())
         if sprache:
             values["ocr_sprache"] = sprache
+        if engine in config.OCR_ENGINES:
+            values["ocr_engine"] = engine
         config.save_settings(values)
         hinweis = " Der neue Bibliotheksordner gilt nach einem Neustart." if root and Path(root).expanduser() != lib.root else ""
         flash("Einstellungen gespeichert." + hinweis, "ok")
@@ -1047,6 +1050,14 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         return st
 
     app.jinja_env.globals["sicherung_faellig"] = lambda: sicherung.status()["faellig"] and bool(lib.keys())
+
+    @app.post("/sicherung/extern")
+    def sicherung_extern():
+        s = dict(config.settings().get("sicherung") or {})
+        s["extern"] = bool(request.form.get("extern"))
+        config.save_settings({"sicherung": s})
+        flash("Gespeichert.", "ok")
+        return redirect(url_for("einstellungen") + "#sicherung")
 
     @app.post("/sicherung")
     def sicherung_starten():

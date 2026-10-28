@@ -35,7 +35,7 @@ def _env() -> None:
 def _options(**kw):
     from immich_book_ocr.pipeline import PipelineOptions
 
-    return PipelineOptions(language=config.ocr_language(), **kw)
+    return PipelineOptions(language=config.ocr_language(), engine=config.ocr_engine(), **kw)
 
 
 def ocr_folder(images: Path, output: Path, *, single_page: bool = False, order: str = "filename",

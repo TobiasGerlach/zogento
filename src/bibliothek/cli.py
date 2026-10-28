@@ -531,6 +531,8 @@ def cmd_status(args) -> int:
     if sich["zuletzt"]:
         print(f"Sicherung:    vor {sich['tage']:.0f} Tag(en) nach {sich['ziel']}"
               + ("  ← fällig: bib sicherung" if sich["faellig"] else ""))
+    elif sich["extern"]:
+        print("Sicherung:    übernimmt die Ablage (NAS)")
     elif items:
         print("Sicherung:    noch nie — bib sicherung <ordner auf externer Platte>")
     return 0
@@ -636,6 +638,12 @@ def cmd_einstellung(args) -> int:
         config.save_settings({"bibliothek": str(Path(args.bibliothek).expanduser().resolve())})
     if args.ocr_sprache:
         config.save_settings({"ocr_sprache": args.ocr_sprache})
+    if args.ocr_engine:
+        config.save_settings({"ocr_engine": args.ocr_engine})
+    if args.sicherung_extern:
+        s = dict(config.settings().get("sicherung") or {})
+        s["extern"] = args.sicherung_extern == "ja"
+        config.save_settings({"sicherung": s})
     print(f"Einstellungen: {config.SETTINGS_FILE}")
     print(json.dumps(config.settings(), ensure_ascii=False, indent=2))
     return 0
@@ -905,6 +913,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("einstellung", help="Bibliotheksordner, OCR-Sprache")
     s.add_argument("--bibliothek")
     s.add_argument("--ocr-sprache", help="Tesseract-Codes, z. B. eng+deu, deu_latf für Fraktur")
+    s.add_argument("--ocr-engine", choices=config.OCR_ENGINES,
+                   help="auto = Apple Vision auf dem Mac, sonst Tesseract; tesseract = nur Open Source")
+    s.add_argument("--sicherung-extern", choices=["ja", "nein"],
+                   help="ja: die Ablage wird anderweitig gesichert (z. B. vom NAS), keine Erinnerung")
     s.set_defaults(func=cmd_einstellung)
 
     s = sub.add_parser("nas", help="Nextcloud oder WebDAV-Server als Ablage: verbinden, status, trennen")

@@ -336,3 +336,15 @@ def test_zusammenfuehren_angaben_und_datei(lib, kataloge):
     lib.save(andere)
     with pytest.raises(ValueError, match="beide"):
         ingest.zusammenfuehren(lib, "bosch2011ganzheitliche", "x2000y")
+
+
+def test_ocr_engine_und_sicherung_extern(client, monkeypatch):
+    from bibliothek import ocr
+    assert config.ocr_engine() == "auto" and ocr._options().engine == "auto"
+    client.post("/einstellungen", data={"csrf": TOKEN, "ocr_engine": "tesseract"})
+    assert config.ocr_engine() == "tesseract" and ocr._options().engine == "tesseract"
+    client.post("/einstellungen", data={"csrf": TOKEN, "ocr_engine": "quatsch"})
+    assert config.ocr_engine() == "tesseract"
+    assert sicherung.status()["faellig"]
+    client.post("/sicherung/extern", data={"csrf": TOKEN, "extern": "1"})
+    assert not sicherung.status()["faellig"] and "Die letzte Sicherung" not in client.get("/pruefen").get_data(as_text=True)
