@@ -199,3 +199,22 @@ def test_abgebrochener_lauf_erzeugt_keine_scheinkonflikte(nas, rechner, tmp_path
         b = sync.abgleichen(mac, dav=nas)
         assert b["konflikte"] == []
         assert not any(".konflikt-" in k for k in nas.files)
+
+
+def test_zusammenfuehren_wandert_mit(nas, rechner, tmp_path):
+    from bibliothek.store import Item
+    with rechner("mac") as mac:
+        _neu(mac, tmp_path)                                     # muster2020jona mit Datei
+        mac.save(Item(citekey="muster2020jonalesen", felder={"author": "Muster, Max", "title": "Jona lesen",
+                                                              "year": "2020", "publisher": "Verlag"}))
+        sync.abgleichen(mac, dav=nas)
+        ingest.zusammenfuehren(mac, "muster2020jona", "muster2020jonalesen")
+        sync.abgleichen(mac, dav=nas)
+        assert "titel/muster2020jonalesen/jona.txt" in nas.files
+        assert not any(k.startswith("titel/muster2020jona/") for k in nas.files)
+    with rechner("win") as win:
+        sync.abgleichen(win, dav=nas)
+        assert win.keys() == ["muster2020jonalesen"]
+        it = win.get("muster2020jonalesen")
+        assert it.felder["publisher"] == "Verlag" and it.felder["ids"] == "muster2020jona"
+        assert dateien.original(win, it, "jona.txt").read_text(encoding="utf-8").startswith("Jona")

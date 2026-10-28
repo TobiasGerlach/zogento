@@ -132,6 +132,13 @@ class Item:
             return f"S. {num}"
         return f"S. {num} (Scan {p.scan})"
 
+    def citable(self, p: Page) -> bool:
+        """Darf diese Seitenangabe so zitiert werden (geprüft oder aus dem PDF)?"""
+        status = (self.seitenzaehlung or {}).get("status")
+        if status == STATUS_KEINE or self.page_number(p) is None:
+            return False
+        return not (status == STATUS_AUTO and not (self._segment(p.scan) or {}).get("geprueft"))
+
     def to_entry(self) -> bibtex.Entry:
         return bibtex.Entry(self.eintrag, self.citekey, dict(self.felder), self.kommentar)
 
@@ -205,6 +212,9 @@ class Library:
         """Schlüssel exakt, sonst eindeutiger Präfix oder Titelteil."""
         if self.exists(ref):
             return self.get(ref)
+        alias = self.by_alias(ref)
+        if alias:
+            return alias
         keys = self.keys()
         hits = [k for k in keys if k.startswith(ref.lower())]
         if not hits:
@@ -215,6 +225,13 @@ class Library:
         if not hits:
             raise KeyError(f"Kein Titel passt zu {ref!r}")
         raise KeyError(f"{ref!r} ist mehrdeutig: {', '.join(hits[:8])}")
+
+    def by_alias(self, key: str) -> Item | None:
+        """Titel, der `key` als früheren Schlüssel führt (biblatex-Feld ids, gesetzt beim Umbenennen)."""
+        for it in self.items():
+            if key in [x.strip() for x in it.felder.get("ids", "").split(",")]:
+                return it
+        return None
 
     def save(self, item: Item, *, render: bool = True) -> None:
         folder = self.folder(item.citekey)

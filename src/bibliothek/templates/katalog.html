@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Katalog · {{ item.short }}{% endblock %}
+{% block content %}
+<p class="brotkrumen"><a href="{{ url_for('pruefen') }}">Prüfen</a> / <a href="{{ url_for('titel', key=item.citekey) }}"><code>{{ item.citekey }}</code></a> / Katalog</p>
+<h1>Angaben nachschlagen</h1>
+<p class="untertitel">{{ item.short }} · {{ item.title }}</p>
+<p class="erklaerung">Gesucht in DNB, Crossref, OpenAlex und Open Library. <strong>sicher</strong>: ISBN/DOI und Titel stehen im
+  Dokument selbst. <strong>wahrscheinlich</strong>: Titel und Autor stehen im Dokument. <strong>möglich</strong>: nur über die
+  Titelsuche — am Impressum prüfen, besonders Auflage und Jahr deiner Ausgabe.
+  {% if automatisch %}Beim Übernehmen bekommt der Titel einen passenden Schlüssel; der alte bleibt als Alias (<code>ids</code>) gültig.{% endif %}</p>
+
+<form method="get" class="reihe karte">
+  <label class="feld"><span>Titel für die Suche</span><input name="titel" value="{{ suchtitel }}"></label>
+  <label class="feld"><span>Autor (Nachname)</span><input name="autor" value="{{ autor }}"></label>
+  <div class="knoepfe"><button type="submit" class="zweitrangig">Neu suchen</button></div>
+</form>
+
+{% if fehler %}<p class="meldung fehler">{{ fehler }}</p>{% endif %}
+{% if not vorschlaege and not fehler %}<p class="meldung hinweis">Kein Treffer. Anderen Suchtitel versuchen oder die Angaben aus dem Impressum von Hand eintragen.</p>{% endif %}
+
+{% for v in vorschlaege %}
+<section class="karte vorschlag vorschlag-{{ v.sicherheit|replace('ö', 'oe') }}">
+  <h2><span class="status status-{{ 'bestätigt' if v.sicherheit == 'sicher' else ('automatisch' if v.sicherheit == 'wahrscheinlich' else 'unbekannt') }}">{{ v.sicherheit }}</span>
+    {{ v.quelle }} · <span class="typ">{{ v.eintrag }}</span> <a class="leise" href="{{ v.url }}" target="_blank" rel="noopener">Katalogeintrag ↗</a></h2>
+  <p class="leise">{{ v.begruendung|join(' · ') or 'nur Titelsuche' }}{% if v.oa_pdf %} · <a href="{{ v.oa_pdf }}" target="_blank" rel="noopener">frei zugängliches PDF</a>{% endif %}</p>
+  <table class="vergleich">
+    <thead><tr><th>Feld</th><th>jetzt</th><th>Vorschlag</th></tr></thead>
+    <tbody>
+    {% for f in felder if v.felder.get(f) or item.felder.get(f) %}
+      {% set alt, neu = item.felder.get(f, ''), v.felder.get(f, '') %}
+      <tr class="{{ 'gleich' if alt == neu else ('neu' if not alt else ('anders' if neu else 'nur-alt')) }}">
+        <th>{{ f }}</th><td>{{ alt or '—' }}</td><td>{{ neu or '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% for b in v.begruendung if b.startswith('schon als ') %}{% set anderer = b.split()[2] %}
+  <form method="post" action="{{ url_for('zusammenfuehren', key=item.citekey) }}" class="reihe meldung hinweis"
+        data-bestaetigen="{{ item.citekey }} in {{ anderer }} aufgehen lassen? Dessen Angaben gelten, {{ item.citekey }} bleibt als Alias zitierbar.">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="ziel" value="{{ anderer }}">
+    <span>Dieses Werk ist schon als <a href="{{ url_for('titel', key=anderer) }}"><code>{{ anderer }}</code></a> in der Bibliothek.</span>
+    <button type="submit">Mit {{ anderer }} zusammenführen</button>
+  </form>
+  {% endfor %}
+  <form method="post" action="{{ url_for('katalog_uebernehmen', key=item.citekey) }}" class="reihe">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="nr" value="{{ loop.index }}">
+    <label class="haken"><input type="checkbox" name="nur_fehlende" value="1"> nur fehlende Felder ergänzen</label>
+    <button type="submit">Übernehmen</button>
+  </form>
+</section>
+{% endfor %}
+{% endblock %}

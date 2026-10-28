@@ -14,7 +14,8 @@ def run() -> int:
         "striprtf.striprtf", "pypdfium2", "torch", "transformers", "sentence_transformers",
         "transformers.models.qwen3.modeling_qwen3", "immich_book_ocr.pipeline",
         "bibliothek.store", "bibliothek.extract", "bibliothek.index", "bibliothek.ingest",
-        "bibliothek.ablage", "bibliothek.sync", "keyring",
+        "bibliothek.ablage", "bibliothek.sync", "bibliothek.katalog", "bibliothek.belege", "bibliothek.sicherung",
+        "bibliothek.bilder", "bibliothek.mcp", "keyring",
     ]
     if sys.platform != "linux":
         modules.append("webview")
@@ -57,5 +58,8 @@ def run() -> int:
                 print(f"FEHLT {name}: {exc!r}")
         from bibliothek import config
         print("ok    tesseract (gebündelt):", config.bundled_tesseract())
+        from bibliothek import mcp
+        antwort = mcp.behandeln(None, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        print("ok    mcp-werkzeuge:", len(antwort["result"]["tools"]))
     print("SMOKE OK" if not failed else f"SMOKE FEHLGESCHLAGEN: {', '.join(failed)}")
     return 1 if failed else 0

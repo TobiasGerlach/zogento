@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Prüfen{% endblock %}
+{% block content %}
+<h1>Prüfen</h1>
+<p class="erklaerung">Was noch fehlt, bevor ein Titel sauber zitierbar ist. Eins nach dem anderen — jeder Punkt ist in ein, zwei Minuten erledigt.</p>
+{% if sicherung_faellig() %}<p class="meldung hinweis">Die letzte Sicherung ist über zwei Wochen her (oder es gab noch keine).
+  <a href="{{ url_for('einstellungen') }}#sicherung">Jetzt sichern</a></p>{% endif %}
+
+<section class="karte">
+  <h2>Angaben fehlen <span class="zahl">{{ angaben|length }}</span></h2>
+  {% if angaben %}
+  <table class="titelliste">
+    <tbody>
+    {% for it in angaben %}
+      <tr><td class="wer">{{ it.short }}<div class="schluessel">{{ it.citekey }}</div></td>
+        <td><a href="{{ url_for('titel', key=it.citekey) }}">{{ it.title }}</a>
+          {% if it.unvollstaendig %}<div class="leise">fehlt: {{ it.unvollstaendig|join(', ') }}</div>{% endif %}</td>
+        <td class="aktionen"><a class="knopf" href="{{ url_for('katalog_seite', key=it.citekey) }}">Nachschlagen</a></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="leise">Alles vollständig.</p>{% endif %}
+</section>
+
+<section class="karte">
+  <h2>Seitenzahlen ungeprüft <span class="zahl">{{ seiten|length }}</span></h2>
+  <p class="leise">Bis zur Prüfung stehen Fundstellen mit „?“ und sind nicht zitierfähig. Meist reicht ein Blick auf drei Scans pro Abschnitt.</p>
+  {% if seiten %}
+  <table class="titelliste">
+    <tbody>
+    {% for it in seiten %}
+      {% set st = (it.seitenzaehlung or {}).get('status') %}
+      <tr><td class="wer">{{ it.short }}<div class="schluessel">{{ it.citekey }}</div></td>
+        <td><a href="{{ url_for('titel', key=it.citekey) }}#seiten">{{ it.title }}</a>
+          {% if (it.seitenzaehlung or {}).get('spruenge') %}<div class="warnung">Zählung springt — Scans fehlen oder sind doppelt</div>{% endif %}</td>
+        <td><span class="status status-{{ st }}">{{ STATUS_TEXT.get(st, st) }}</span></td>
+        <td class="aktionen"><a class="knopf" href="{{ url_for('titel', key=it.citekey) }}#seiten">Prüfen</a></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="leise">Alle Seitenzahlen geprüft.</p>{% endif %}
+</section>
+
+{% if ohne_text %}
+<section class="karte">
+  <h2>Ohne Volltext <span class="zahl">{{ ohne_text|length }}</span></h2>
+  <p class="leise">Nur Literaturangabe, keine Datei — Zitate daraus lassen sich nicht gegen den Text prüfen. Datei oder Buchfotos aufnehmen, sobald vorhanden.</p>
+  <ul class="kompakt">
+  {% for it in ohne_text %}<li><a href="{{ url_for('titel', key=it.citekey) }}">{{ it.short }}, {{ it.title }}</a></li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

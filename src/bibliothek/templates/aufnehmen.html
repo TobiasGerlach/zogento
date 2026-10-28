@@ -41,6 +41,22 @@
 </section>
 
 <section class="karte">
+  <h2>Per DOI oder ISBN</h2>
+  <p class="leise">Angaben aus Crossref, OpenAlex, DNB oder Open Library. Gibt es eine frei zugängliche Fassung (Open Access), wird das PDF gleich mit aufgenommen.</p>
+  <form method="post" action="{{ url_for('aufnehmen_kennung') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>DOI oder ISBN (mehrere durch Leerzeichen oder Zeilen getrennt)</span>
+      <textarea name="kennungen" rows="2" placeholder="10.1234/abcd.5678   978-3-7655-9425-1" required></textarea></label>
+    <div class="reihe">
+      <label class="feld"><span>Tags</span><input name="tags" placeholder="Jona, Gattung"></label>
+      <label class="feld"><span>Projekte</span><input name="projekte" placeholder="Hermeneutik/arbeit"></label>
+    </div>
+    <label class="haken"><input type="checkbox" name="ohne_pdf" value="1"> nur Angaben, kein PDF laden</label>
+    <div class="knoepfe"><button type="submit">Aufnehmen</button></div>
+  </form>
+</section>
+
+<section class="karte">
   <h2>Buch scannen (OCR)</h2>
   <p class="leise">Ordner mit Fotos oder Scans eines Buches, oder ein Immich-Freigabelink. Doppelseiten werden automatisch getrennt; das Ergebnis lässt sich in der OCR-Prüfansicht kontrollieren.</p>
   <form method="post" action="{{ url_for('aufnehmen_scans') }}">

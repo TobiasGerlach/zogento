@@ -234,3 +234,47 @@ def _guess_type(ex: extract.Extracted) -> str:
 def _safe_name(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(". ")
     return name or "datei"
+
+
+def zusammenfuehren(lib: Library, quelle: str, ziel: str) -> Item:
+    """Zwei Einträge desselben Werks vereinen. Der Schlüssel `ziel` bleibt, `quelle` wird Alias (ids).
+
+    Angaben von `ziel` haben Vorrang, fehlende kommen aus `quelle`. Höchstens einer der beiden darf
+    Dateien oder Text haben; der wird umbenannt (auf der Ablage nur verschoben, nicht neu hochgeladen).
+    """
+    q, z = lib.get(quelle), lib.get(ziel)
+    if q.citekey == z.citekey:
+        raise ValueError("Zweimal derselbe Titel.")
+
+    def hat_inhalt(it: Item) -> bool:
+        return bool(it.dateien) or (lib.folder(it.citekey) / "seiten.jsonl").exists() or bool(it.text.get("ocr_ordner"))
+
+    if hat_inhalt(q) and hat_inhalt(z):
+        raise ValueError(f"{quelle} und {ziel} haben beide Dateien oder Text — einen davon vorher löschen "
+                         f"(bib loeschen), dann zusammenführen.")
+    felder = {**{k: v for k, v in q.felder.items() if k != "ids"}, **z.felder}
+    ids = [x.strip() for x in (z.felder.get("ids", "") + "," + q.felder.get("ids", "")).split(",") if x.strip()]
+    felder["ids"] = ", ".join(dict.fromkeys(ids + [quelle]))
+    notizen = [t for t in ((lib.folder(k) / "notizen.md") for k in (ziel, quelle)) if t.exists()]
+    notiztext = "\n\n".join(t.read_text(encoding="utf-8").strip() for t in notizen)
+    traeger = q if hat_inhalt(q) else z
+    traeger.felder = felder
+    traeger.eintrag = z.eintrag
+    for attr in ("tags", "kategorien", "projekte"):
+        setattr(traeger, attr, list(dict.fromkeys(getattr(z, attr) + getattr(q, attr))))
+    traeger.notiz = "\n\n".join(x for x in (z.notiz, q.notiz) if x)
+    traeger.kommentar = "\n".join(x for x in (z.kommentar, q.kommentar) if x)
+    traeger.unvollstaendig = [f for f in PFLICHT if not felder.get(f) and not (f == "author" and felder.get("editor"))
+                              and not (f == "year" and felder.get("date"))]
+    if "metadaten" in z.text:
+        traeger.text["metadaten"] = z.text["metadaten"]
+    if traeger is q:
+        lib.save(q)
+        lib.delete(ziel)
+        traeger = lib.rename(q, ziel)
+    else:
+        lib.save(z)
+        lib.delete(quelle)
+    if notiztext:
+        (lib.folder(ziel) / "notizen.md").write_text(notiztext + "\n", encoding="utf-8")
+    return lib.get(ziel)

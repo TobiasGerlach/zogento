@@ -79,7 +79,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 button, .knopf { display: inline-block; padding: 0.45rem 1rem; border: 1px solid var(--akzent); border-radius: var(--radius);
   background: var(--akzent); color: var(--akzent-text); cursor: pointer; font-weight: 500; }
 .knopf:hover { text-decoration: none; filter: brightness(1.05); }
-button.zweitrangig { background: transparent; color: var(--akzent); }
+button.zweitrangig, .knopf.zweitrangig { background: transparent; color: var(--akzent); }
 button.gefaehrlich { background: transparent; color: var(--fehler); border-color: var(--fehler); }
 button[disabled] { opacity: 0.5; cursor: not-allowed; }
 .feld { display: block; margin-bottom: 0.8rem; flex: 1 1 12rem; }
@@ -216,3 +216,21 @@ button.klein { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
 @keyframes drehen { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .nas-laeuft .punkt { animation: none; border-top-color: var(--akzent); } }
 .kennzahlen { margin: 0.2rem 0 0.8rem; padding-left: 1.2rem; }
+
+/* Scan-Vorschau neben Beispielzeilen */
+.scanbild { display: inline-block; vertical-align: top; margin: 0 0.5rem 0.3rem 0; }
+.scanbild img { width: 90px; height: auto; border: 1px solid var(--linie); border-radius: 4px; background: var(--flaeche); }
+.scanbild img:hover { outline: 2px solid var(--akzent); }
+.beispiel { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.25rem 0.5rem; margin-bottom: 0.4rem; }
+
+/* Katalogvorschläge */
+.vergleich { width: 100%; border-collapse: collapse; margin: 0.5rem 0 0.8rem; font-size: 0.92rem; }
+.vergleich th, .vergleich td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--linie); vertical-align: top; }
+.vergleich tbody th { font-family: var(--mono); font-weight: normal; color: var(--leise); white-space: nowrap; }
+.vergleich tr.neu td:last-child { background: var(--ok-bg); }
+.vergleich tr.anders td:last-child { background: var(--warn-bg); }
+.vergleich tr.gleich { color: var(--leise); }
+.vorschlag-sicher { border-left: 4px solid var(--ok); }
+.vorschlag-wahrscheinlich { border-left: 4px solid var(--warn); }
+.knopf.klein { padding: 0.15rem 0.55rem; font-size: 0.8rem; vertical-align: middle; }
+ul.kompakt { margin: 0; padding-left: 1.2rem; }

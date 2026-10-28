@@ -7,7 +7,8 @@
 <p class="untertitel">{{ item.short }} · <span class="typ">{{ item.eintrag }}</span> · aufgenommen {{ item.hinzugefuegt }}</p>
 
 {% if item.unvollstaendig %}
-  <p class="meldung fehler">Es fehlen Angaben: <strong>{{ item.unvollstaendig|join(', ') }}</strong>. Bitte aus dem Impressum ergänzen — nicht schätzen.</p>
+  <p class="meldung fehler">Es fehlen Angaben: <strong>{{ item.unvollstaendig|join(', ') }}</strong>. Bitte aus dem Impressum ergänzen — nicht schätzen.
+    <a class="knopf" href="{{ url_for('katalog_seite', key=item.citekey) }}">In Katalogen nachschlagen</a></p>
 {% endif %}
 {% for h in item.text.get('hinweise') or [] %}
   <p class="meldung hinweis">{{ h }}</p>
@@ -75,6 +76,7 @@
         <td>
           {% for b in a.beispiele %}
             <div class="beispiel">
+              <a class="scanbild" href="{{ url_for('scan_bild', key=item.citekey, scan=b.scan) }}" target="_blank" rel="noopener" title="Scan {{ b.scan }} groß ansehen"><img loading="lazy" src="{{ url_for('scan_bild', key=item.citekey, scan=b.scan) }}" alt="Scan {{ b.scan }}" onerror="this.parentNode.remove()"></a>
               <a href="{{ url_for('text', key=item.citekey, scan=b.scan) }}#scan-{{ b.scan }}">Scan {{ b.scan }}</a>
               → <strong>{{ b.ref }}</strong>
               <span class="zeilen"><span>oben: {{ b.zeilen[0]|truncate(60) }}</span><span>unten: {{ b.zeilen[1]|truncate(60) }}</span></span>
@@ -108,7 +110,8 @@
       <tbody>
       {% for p in beispiele %}
         {% set zeilen = p.text.strip().splitlines() %}
-        <tr><td><a href="{{ url_for('text', key=item.citekey, scan=p.scan) }}#scan-{{ p.scan }}">{{ p.scan }}</a></td>
+        <tr><td><a href="{{ url_for('text', key=item.citekey, scan=p.scan) }}#scan-{{ p.scan }}">{{ p.scan }}</a>
+          <a class="scanbild" href="{{ url_for('scan_bild', key=item.citekey, scan=p.scan) }}" target="_blank" rel="noopener"><img loading="lazy" src="{{ url_for('scan_bild', key=item.citekey, scan=p.scan) }}" alt="Scan {{ p.scan }}" onerror="this.parentNode.remove()"></a></td>
           <td class="zeilen"><span>{{ (zeilen[0] if zeilen else '')|truncate(70) }}</span><span>{{ (zeilen[-1] if zeilen else '')|truncate(70) }}</span></td></tr>
       {% endfor %}
       </tbody>
@@ -143,7 +146,10 @@
 </section>
 
 <section id="metadaten" class="karte">
-  <h2>Metadaten</h2>
+  <h2>Metadaten <a class="knopf zweitrangig klein" href="{{ url_for('katalog_seite', key=item.citekey) }}">In Katalogen nachschlagen</a></h2>
+  {% if item.text.get('metadaten') %}{% set m = item.text.get('metadaten') %}
+    <p class="leise">Angaben aus <a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.quelle }}</a> ({{ m.sicherheit }}{% if m.belege %}: {{ m.belege|join('; ') }}{% endif %}).</p>
+  {% endif %}
   <form method="post" action="{{ url_for('metadaten', key=item.citekey) }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label class="feld schmal"><span>Eintragstyp (BibLaTeX)</span>

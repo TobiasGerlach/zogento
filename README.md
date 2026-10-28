@@ -23,7 +23,20 @@ Läuft auf macOS, Ubuntu und Windows als App (Fenster) und als Kommandozeile `bi
 - **BibTeX:** Felder bleiben wörtlich erhalten. `refs.bib` wird erzeugt; `bib bibtex --aus-tex`
   schreibt nur die Einträge, die eine Arbeit zitiert.
 - **Import:** BibTeX-Dateien (mit Textordner), Zotero (nur lesend, inkl. Sammlungen und
-  Markierungen), fertige Buch-OCR-Ausgaben.
+  Markierungen), fertige Buch-OCR-Ausgaben, per DOI/ISBN (Angaben aus Katalogen, frei
+  zugängliches PDF über OpenAlex).
+- **Kataloge:** Fehlende Angaben in DNB, Crossref, OpenAlex und Open Library nachschlagen.
+  Jeder Vorschlag nennt Quelle und Belegstärke (sicher = ISBN/DOI und Titel stehen im
+  Dokument). Übernommen wird nur, was du auswählst; der alte Zitierschlüssel bleibt als
+  Alias (`ids`) gültig.
+- **Zitate prüfen:** `bib beleg` findet ein wörtliches Zitat im Volltext (tolerant gegen
+  Silbentrennung), nennt die echte Seite, ob sie zitierfähig ist, und Abweichungen Wort für Wort.
+- **Prüfen:** eine Seite mit allem, was noch offen ist (fehlende Angaben, ungeprüfte
+  Seitenzahlen), Scanbilder direkt neben der Seitenzählung.
+- **Für KI-Agenten:** MCP-Server (`bib mcp`) mit Werkzeugen für Suche, Lesen, Zitatprüfung,
+  BibTeX und Aufnahme; jede Seitenangabe sagt, ob sie zitierfähig ist.
+- **Sicherung:** `bib sicherung <ordner>` schreibt eine vollständige, direkt nutzbare Kopie
+  (auch der Originale aus der Ablage), inkrementell.
 
 ## Daten
 
@@ -85,6 +98,26 @@ entfernt es danach aus dem Eingang. Die App gleicht beim Start, alle 5 Minuten
 und nach Änderungen ab; ohne Verbindung bleibt alles vorgemerkt. Passwörter
 liegen im Schlüsselbund des Systems.
 
+## KI-Agenten (MCP)
+
+```sh
+claude mcp add bibliothek -- bib mcp        # Claude Code, im Projektordner
+```
+
+Oder als `.mcp.json` im Projekt: `{"mcpServers": {"bibliothek": {"command": "bib", "args": ["mcp"]}}}`.
+Läuft die App, nutzt die Suche deren schon geladenes Sprachmodell. Werkzeuge: `suche`, `lies`,
+`zitat_pruefen`, `titel`, `liste`, `bibtex`, `status`, `metadaten_vorschlaege`, `aufnehmen`.
+
+## Sicherung
+
+```sh
+bib sicherung /Volumes/Platte/Bibliothek    # danach reicht: bib sicherung
+```
+
+Die Sicherung ist selbst eine vollständige Bibliothek (öffnen mit `bib einstellung --bibliothek …`).
+Mit Ablage werden Originale und Scans von dort geholt. Gelöscht wird in der Sicherung nie etwas.
+`bib status` und die App erinnern nach zwei Wochen.
+
 ## Installation
 
 Fertige Pakete entstehen per GitHub Actions (`.github/workflows/release.yml`) bei
@@ -115,12 +148,16 @@ uv run pytest
 ```sh
 bib neu datei.pdf --tag Jona --projekt Hermeneutik
 bib scans ~/Fotos/Buch --titel "Biblische Hermeneutik" --autor "Nachname, Vorname" --jahr 2019
+bib neu --doi 10.1234/abcd --projekt Hermeneutik
 bib suche "Satire im Jonabuch"
+bib beleg hurlbert2023drowning "these attempts to classify Jonah are, as I will argue, misguided" --seite 88
+bib metadaten --alle                         # Katalogvorschläge für alle unvollständigen Titel
 bib zeige hurlbert2023drowning --seiten 90-91
 bib seiten feestuart2015effektives            # Seitenzählung prüfen
 bib bearbeite feestuart2015effektives --tag +Hermeneutik --kategorie Methodik
 bib bibtex --aus-tex lectures/Hermeneutik/arbeit/src -o lectures/Hermeneutik/arbeit/src/references.bib
 bib status
+bib sicherung /Volumes/Platte/Bibliothek
 ```
 
 ## Herkunft

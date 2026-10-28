@@ -75,6 +75,23 @@ def _print_item_line(item) -> None:
 def cmd_neu(args) -> int:
     lib = _lib()
     rc = 0
+    if not args.dateien and not (args.doi or args.isbn):
+        print("Datei(en) angeben oder --doi / --isbn.", file=sys.stderr)
+        return 2
+    for art, kennung in [("doi", d) for d in args.doi] + [("isbn", i) for i in args.isbn]:
+        from . import katalog
+        try:
+            item, hinweis = katalog.aufnehmen(lib, **{art: kennung}, tags=args.tag, projekte=args.projekt,
+                                              kategorien=args.kategorie, pdf=not args.ohne_pdf,
+                                              progress=lambda m: print("  " + m, file=sys.stderr))
+            print(f"+ {item.citekey}  {item.short}, {item.title}" + (f"  ({item.text.get('seiten')} Seiten)" if item.text.get("seiten") else ""))
+            if hinweis:
+                print(f"  ! {hinweis}")
+        except ingest.Duplicate as d:
+            print(f"= {kennung}: {d}")
+        except katalog.KatalogFehler as exc:
+            print(f"! {kennung}: {exc}", file=sys.stderr)
+            rc = 1
     for f in args.dateien:
         try:
             item = ingest.add_file(lib, Path(f), eintrag=args.typ, run_ocr=not args.ohne_ocr,
@@ -318,6 +335,70 @@ def cmd_bearbeite(args) -> int:
     return 0
 
 
+def cmd_metadaten(args) -> int:
+    """Fehlende Angaben in offenen Katalogen nachschlagen und auf Wunsch übernehmen."""
+    from . import katalog
+
+    lib = _lib()
+    if args.alle:
+        items = [it for it in lib.items() if it.unvollstaendig or katalog.ist_automatischer_key(it.citekey)]
+    elif args.titel:
+        items = [lib.resolve(args.titel)]
+    else:
+        print("Titel angeben oder --alle.", file=sys.stderr)
+        return 2
+    ergebnis = []
+    geaendert = False
+    for item in items:
+        if args.nehmen:
+            vs = katalog.gemerkt(item) or katalog.vorschlaege(lib, item, titel=args.suchtitel, autor=args.autor)
+        else:
+            try:
+                vs = katalog.vorschlaege(lib, item, titel=args.suchtitel, autor=args.autor)
+            except katalog.KatalogFehler as exc:
+                print(f"{item.citekey}: {exc}", file=sys.stderr)
+                continue
+            katalog.merken(item, vs)
+        wahl = None
+        if args.nehmen:
+            if not 1 <= args.nehmen <= len(vs):
+                print(f"{item.citekey}: Vorschlag {args.nehmen} gibt es nicht ({len(vs)} Vorschläge).", file=sys.stderr)
+                return 1
+            wahl = vs[args.nehmen - 1]
+        elif args.sichere_uebernehmen and vs and vs[0].sicherheit == katalog.SICHER:
+            wahl = vs[0]
+        if wahl:
+            alt = item.citekey
+            item = katalog.uebernehmen(lib, item, wahl, nur_fehlende=args.nur_fehlende)
+            geaendert = True
+            if not args.json:
+                print(f"✓ {alt}" + (f" → {item.citekey}" if item.citekey != alt else "") + f": {item.short}, {item.title}"
+                      f"  [{wahl.quelle}, {wahl.sicherheit}]")
+        ergebnis.append({"citekey": item.citekey, "uebernommen": wahl.to_dict() if wahl else None,
+                         "vorschlaege": [v.to_dict() for v in vs]})
+        if not args.json and not wahl:
+            print(f"{item.citekey} — {item.short}, {item.title}")
+            if not vs:
+                print("    keine Treffer in DNB, Crossref, OpenAlex, Open Library")
+            for i, v in enumerate(vs, 1):
+                f = v.felder
+                wer = f.get("author") or (f"{f['editor']} (Hrsg.)" if f.get("editor") else "?")
+                titel = f.get("title", "") + (f". {f['subtitle']}" if f.get("subtitle") else "")
+                wo = ", ".join(x for x in (f.get("journaltitle") or f.get("booktitle"), f.get("location"),
+                                           f.get("publisher"), f.get("year")) if x)
+                print(f"  {i}. [{v.sicherheit}] {wer}: {titel}. {wo}")
+                print(f"     {v.quelle} {v.url} — {'; '.join(v.begruendung) or 'nur Titelsuche'}")
+            if vs:
+                print(f"     übernehmen: bib metadaten {item.citekey} --nehmen N")
+    if geaendert:
+        index.update(lib)
+        lib.write_refs_bib()
+        _nach_aenderung(lib)
+    if args.json:
+        print(json.dumps(ergebnis, ensure_ascii=False, indent=1))
+    return 0
+
+
 def cmd_seiten(args) -> int:
     lib = _lib()
     item = lib.resolve(args.titel)
@@ -395,8 +476,13 @@ def cmd_bibtex(args) -> int:
             text = re.sub(r"(?<!\\)%.*", "", text)  # auskommentierte Zitate zählen nicht
             for m in re.finditer(r"\\\w*cite\w*\*?(?:\[[^\]]*\]){0,2}\{([^}]+)\}", text):
                 cited.update(k.strip() for k in m.group(1).split(",") if k.strip() and k.strip() != "*")
-        missing += sorted(k for k in cited if not lib.exists(k))
-        keys |= {k for k in cited if lib.exists(k)}
+        for k in sorted(cited):
+            if lib.exists(k):
+                keys.add(k)
+            elif (alias := lib.by_alias(k)):
+                keys.add(alias.citekey)   # alter Schlüssel, steht in ids
+            else:
+                missing.append(k)
     for projekt in args.projekt or []:
         keys |= {it.citekey for it in lib.items() if projekt in it.projekte}
     for k in args.keys or []:
@@ -440,6 +526,80 @@ def cmd_status(args) -> int:
         print(f"Seitenzählung ungeprüft: {', '.join(unchecked)}")
     if s["embeddings"] < s["abschnitte"]:
         print("Semantische Suche unvollständig — `bib index` berechnet die fehlenden Embeddings.")
+    from . import sicherung
+    sich = sicherung.status()
+    if sich["zuletzt"]:
+        print(f"Sicherung:    vor {sich['tage']:.0f} Tag(en) nach {sich['ziel']}"
+              + ("  ← fällig: bib sicherung" if sich["faellig"] else ""))
+    elif items:
+        print("Sicherung:    noch nie — bib sicherung <ordner auf externer Platte>")
+    return 0
+
+
+def cmd_mcp(args) -> int:
+    from . import mcp
+    return mcp.main()
+
+
+def cmd_beleg(args) -> int:
+    from . import belege
+
+    lib = _lib()
+    item = lib.resolve(args.titel)
+    r = belege.pruefen(lib, item, args.zitat, seite=args.seite)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False, indent=1))
+        return 0 if r["gefunden"] else 1
+    print(f"{item.citekey}: {r.get('bewertung', 'nicht gefunden')}"
+          + (f" — {r['seite']}" + (" (zitierfähig)" if r.get("zitierfaehig") else "") if r["gefunden"] else ""))
+    if "angegebene_seite_stimmt" in r:
+        print("  angegebene Seite " + ("stimmt" if r["angegebene_seite_stimmt"] else f"stimmt NICHT ({args.seite})"))
+    for u in r.get("unterschiede", []):
+        print(f"  Zitat „{u['zitat']}“ ↔ Text „{u['text']}“")
+    if r.get("fundstelle"):
+        print("  " + r["fundstelle"])
+    if r.get("hinweis"):
+        print("  ! " + r["hinweis"])
+    return 0 if r["gefunden"] else 1
+
+
+def cmd_sicherung(args) -> int:
+    from . import ablage, sicherung
+
+    lib = _lib()
+    ziel = args.ziel or sicherung.status()["ziel"]
+    if not ziel:
+        print("Zielordner angeben, z. B.: bib sicherung /Volumes/Platte/Bibliothek", file=sys.stderr)
+        return 2
+    try:
+        b = sicherung.sichern(lib, Path(ziel), fortschritt=lambda m: print("  " + m, file=sys.stderr))
+    except (ValueError, ablage.AblageFehler) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"Gesichert nach {b['ziel']}: {b['kopiert']} lokal kopiert, {b['geholt']} von der Ablage geholt "
+          f"({b['bytes'] / 1e6:.0f} MB), {b['unveraendert']} unverändert.")
+    for f in b["fehler"]:
+        print(f"  ! {f}", file=sys.stderr)
+    print(f"Wiederherstellen/Öffnen: bib einstellung --bibliothek \"{b['ziel']}\"")
+    return 1 if b["fehler"] else 0
+
+
+def cmd_zusammenfuehren(args) -> int:
+    lib = _lib()
+    q, z = lib.resolve(args.quelle), lib.resolve(args.ziel)
+    if not args.ja:
+        print(f"Würde {q.citekey} ({q.short}, {q.title}) in {z.citekey} ({z.short}, {z.title}) aufgehen lassen.\n"
+              f"Angaben von {z.citekey} haben Vorrang; {q.citekey} bleibt als Alias zitierbar. Mit --ja bestätigen.")
+        return 1
+    try:
+        item = ingest.zusammenfuehren(lib, q.citekey, z.citekey)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    index.update(lib)
+    lib.write_refs_bib()
+    _print_item_line(item)
+    _nach_aenderung(lib)
     return 0
 
 
@@ -631,10 +791,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_liste)
 
-    s = sub.add_parser("neu", help="Datei(en) aufnehmen: PDF, Word, ODT, RTF, EPUB, HTML, TXT, MD, PPTX, Bilder")
-    s.add_argument("dateien", nargs="+")
+    s = sub.add_parser("neu", help="Datei(en) aufnehmen (PDF, Word, ODT, RTF, EPUB, HTML, TXT, MD, PPTX, Bilder) oder per --doi/--isbn")
+    s.add_argument("dateien", nargs="*")
     _common_meta(s)
     s.add_argument("--ohne-ocr", action="store_true")
+    s.add_argument("--doi", action="append", default=[], help="per DOI aufnehmen (Angaben aus Crossref/OpenAlex, PDF falls frei)")
+    s.add_argument("--isbn", action="append", default=[], help="per ISBN aufnehmen (Angaben aus DNB/Open Library)")
+    s.add_argument("--ohne-pdf", action="store_true", help="mit --doi: kein frei zugängliches PDF laden")
     s.set_defaults(func=cmd_neu)
 
     s = sub.add_parser("scans", help="Buchfotos (Ordner) oder Immich-Link per OCR erfassen")
@@ -662,6 +825,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--notiz")
     s.add_argument("--neuer-key")
     s.set_defaults(func=cmd_bearbeite)
+
+    s = sub.add_parser("metadaten", help="fehlende Angaben in DNB, Crossref, OpenAlex, Open Library nachschlagen")
+    s.add_argument("titel", nargs="?")
+    s.add_argument("--alle", action="store_true", help="alle unvollständigen Titel")
+    s.add_argument("--nehmen", type=int, metavar="N", help="Vorschlag N übernehmen (wie zuletzt angezeigt)")
+    s.add_argument("--sichere-uebernehmen", action="store_true",
+                   help="nur Vorschläge „sicher“ (ISBN/DOI und Titel stehen im Dokument) automatisch übernehmen")
+    s.add_argument("--nur-fehlende", action="store_true", help="vorhandene Felder nicht überschreiben")
+    s.add_argument("--suchtitel", help="mit diesem Titel suchen statt dem gespeicherten")
+    s.add_argument("--autor", help="mit diesem Autor suchen")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_metadaten)
 
     s = sub.add_parser("seiten", help="Seitenzählung anzeigen, bestätigen oder setzen")
     s.add_argument("titel")
@@ -699,6 +874,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("titel")
     s.set_defaults(func=cmd_reocr)
 
+    s = sub.add_parser("zusammenfuehren", help="Doppelten Eintrag in einen anderen aufgehen lassen (Schlüssel bleibt als Alias)")
+    s.add_argument("quelle", help="der aufgehende Eintrag (z. B. das PDF ohne Angaben)")
+    s.add_argument("ziel", help="der bleibende Eintrag (sein Schlüssel und seine Angaben gelten)")
+    s.add_argument("--ja", action="store_true")
+    s.set_defaults(func=cmd_zusammenfuehren)
+
     s = sub.add_parser("loeschen", help="Titel samt Dateien löschen")
     s.add_argument("titel")
     s.add_argument("--ja", action="store_true")
@@ -706,6 +887,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("status", help="Überblick und offene Prüfpunkte")
     s.set_defaults(func=cmd_status)
+
+    s = sub.add_parser("beleg", help="wörtliches Zitat gegen den Volltext prüfen (Seite, Abweichungen)")
+    s.add_argument("titel")
+    s.add_argument("zitat")
+    s.add_argument("--seite", help="angegebene Seite, z. B. 45 oder 45f.")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_beleg)
+
+    s = sub.add_parser("mcp", help="MCP-Server für KI-Agenten (stdin/stdout): claude mcp add bibliothek -- bib mcp")
+    s.set_defaults(func=cmd_mcp)
+
+    s = sub.add_parser("sicherung", help="alles (inkl. Originale von der Ablage) in einen Ordner sichern")
+    s.add_argument("ziel", nargs="?", help="Zielordner, z. B. auf einer externen Platte (Standard: zuletzt benutzter)")
+    s.set_defaults(func=cmd_sicherung)
 
     s = sub.add_parser("einstellung", help="Bibliotheksordner, OCR-Sprache")
     s.add_argument("--bibliothek")

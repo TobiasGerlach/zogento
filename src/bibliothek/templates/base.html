@@ -15,6 +15,8 @@
       <a href="{{ url_for('liste') }}" class="{{ 'aktiv' if request.endpoint in ('liste', 'titel', 'text') }}">Titel</a>
       <a href="{{ url_for('suche') }}" class="{{ 'aktiv' if request.endpoint == 'suche' }}">Suche</a>
       <a href="{{ url_for('aufnehmen') }}" class="{{ 'aktiv' if request.endpoint == 'aufnehmen' }}">Aufnehmen</a>
+      {% set offen = pruef_anzahl() %}
+      <a href="{{ url_for('pruefen') }}" class="{{ 'aktiv' if request.endpoint in ('pruefen', 'katalog_seite') }}" title="Fehlende Angaben, ungeprüfte Seitenzahlen">Prüfen{% if offen %} <span class="zahl">{{ offen }}</span>{% endif %}</a>
       <a href="{{ url_for('jobs_seite') }}" class="{{ 'aktiv' if request.endpoint in ('jobs_seite', 'job_seite') }}">Jobs{% if aktive_jobs %} <span class="zahl" data-aktive-jobs>{{ aktive_jobs }}</span>{% endif %}</a>
       <a href="{{ url_for('einstellungen') }}" class="{{ 'aktiv' if request.endpoint == 'einstellungen' }}">Einstellungen</a>
     </nav>

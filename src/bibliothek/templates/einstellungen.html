@@ -83,6 +83,24 @@
   {% endif %}
 </section>
 
+<section class="karte" id="sicherung">
+  <h2>Sicherung</h2>
+  {% if sicherung.zuletzt %}
+    <p>Zuletzt gesichert am <strong>{{ sicherung.datum }}</strong> nach <code>{{ sicherung.ziel }}</code>
+      {% if sicherung.faellig %}<span class="warnung">wieder fällig</span>{% endif %}</p>
+  {% else %}
+    <p class="meldung hinweis">Noch keine Sicherung. {% if nas %}Originale und Scans liegen nur in der Ablage — fällt sie aus, sind sie weg.{% endif %}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('sicherung_starten') }}" class="reihe">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="feld"><span>Zielordner (z. B. auf einer externen Platte)</span>
+      <input name="ziel" value="{{ sicherung.ziel or '' }}" placeholder="/Volumes/Platte/Bibliothek"></label>
+    <div class="knoepfe"><button type="submit">Jetzt sichern</button></div>
+  </form>
+  <p class="leise">Die Sicherung ist selbst eine vollständige Bibliothek mit allen Originalen und Scans — zum Wiederherstellen
+    einfach oben als Bibliotheksordner eintragen. Jeder Lauf überträgt nur Geändertes; in der Sicherung wird nichts gelöscht.</p>
+</section>
+
 <section class="karte">
   <h2>Kommandozeile <code>bib</code></h2>
   <p>Mit <code>bib</code> durchsuchen Claude und andere KI-Werkzeuge die Bibliothek, z. B. <code>bib suche "Ironie Jona"</code> oder <code>bib zeige feestuart2015effektives --seiten 45-47</code>.</p>

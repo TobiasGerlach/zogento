@@ -135,6 +135,7 @@ function jobanzeige() {
     if (job.status === "fertig" || job.status === "fehler") {
       ergebnisEl.textContent = "";
       const e = job.ergebnis || {};
+      if (e.meldung) { const m = document.createElement("p"); m.className = "meldung ok"; m.textContent = e.meldung; ergebnisEl.appendChild(m); }
       liste("Aufgenommen:", e.neu, link);
       liste("Schon vorhanden:", e.doppelt, (d) => { const s = document.createElement("span"); s.append(d.datei + " → "); s.append(link(d.citekey)); return s; });
       liste("Fehlgeschlagen:", e.fehler, (d) => document.createTextNode(d.datei + " (" + d.fehler + ")"));

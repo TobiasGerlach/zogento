@@ -89,19 +89,30 @@ def update(lib: Library, *, keys: Iterable[str] | None = None, rebuild: bool = F
                               "INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild');")
         known = dict(con.execute("SELECT citekey, signatur FROM docs"))
         present = set(lib.keys())
+        neu = {k: _signature(lib, k) for k in present - set(known)}
+        vorrat: dict[str, bytes] = {}   # Text → Embedding: bei unverändertem Text nicht neu rechnen
         for key in set(known) - present:
-            _drop(con, key)
+            ziel = next((k for k, sig in neu.items() if sig == known[key] and sig != "leer"), None)
+            if ziel:   # umbenannt: Abschnitte samt Embeddings behalten
+                con.execute("UPDATE chunks SET citekey=? WHERE citekey=?", (ziel, key))
+                con.execute("UPDATE docs SET citekey=? WHERE citekey=?", (ziel, key))
+                known[ziel] = known.pop(key)
+                del neu[ziel]
+                continue
+            vorrat.update(_drop(con, key))
             removed += 1
         for key in (keys or sorted(present)):
             sig = _signature(lib, key)
             if known.get(key) == sig:
                 continue
-            _drop(con, key)
+            vorrat.update(_drop(con, key))
             for page in lib.pages(key):
                 for pos, chunk in enumerate(chunk_text(page.text)):
                     cur = con.execute("INSERT INTO chunks(citekey, scan, pos, text) VALUES(?,?,?,?)",
                                       (key, page.scan, pos, chunk))
                     con.execute("INSERT INTO chunks_fts(rowid, text) VALUES(?,?)", (cur.lastrowid, chunk))
+                    if chunk in vorrat:
+                        con.execute("INSERT INTO emb VALUES(?,?)", (cur.lastrowid, vorrat[chunk]))
             con.execute("INSERT OR REPLACE INTO docs VALUES(?,?)", (key, sig))
             changed += 1
             progress(f"Index: {key}")
@@ -110,13 +121,17 @@ def update(lib: Library, *, keys: Iterable[str] | None = None, rebuild: bool = F
     return {"aktualisiert": changed, "entfernt": removed}
 
 
-def _drop(con: sqlite3.Connection, key: str) -> None:
+def _drop(con: sqlite3.Connection, key: str) -> dict[str, bytes]:
+    """Abschnitte eines Titels entfernen; gibt Text → Embedding der entfernten Abschnitte zurück."""
+    vecs = dict(con.execute("SELECT c.text, e.vec FROM chunks c JOIN emb e ON e.chunk_id = c.id WHERE c.citekey=?",
+                            (key,)))
     rows = con.execute("SELECT id, text FROM chunks WHERE citekey=?", (key,)).fetchall()
     for cid, text in rows:
         con.execute("INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES('delete', ?, ?)", (cid, text))
         con.execute("DELETE FROM emb WHERE chunk_id=?", (cid,))
     con.execute("DELETE FROM chunks WHERE citekey=?", (key,))
     con.execute("DELETE FROM docs WHERE citekey=?", (key,))
+    return vecs
 
 
 # --- Embeddings ------------------------------------------------------------------------

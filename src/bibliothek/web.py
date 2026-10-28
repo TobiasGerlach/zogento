@@ -27,7 +27,7 @@ from markupsafe import Markup, escape
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
-from . import ablage, config, dateien, extract, index, ingest, pagenums, sync
+from . import ablage, bilder, config, dateien, extract, index, ingest, katalog, pagenums, sicherung, sync
 from .jobs import JobRunner
 from .store import (STATUS_AUTO, STATUS_BESTAETIGT, STATUS_KEINE, STATUS_PDF, STATUS_UNBEKANNT, Item, Library,
                     Page)
@@ -475,6 +475,82 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         flash(meldung, "ok")
         return back
 
+    @app.get("/titel/<key>/scan/<int:scan>.jpg")
+    def scan_bild(key, scan):
+        item = get_item(key)
+        try:
+            path = bilder.scan_bild(lib, item, scan)
+        except ablage.NichtErreichbar:
+            abort(503)
+        if not path:
+            abort(404)
+        return send_file(path, mimetype="image/jpeg", max_age=3600)
+
+    @app.get("/titel/<key>/katalog")
+    def katalog_seite(key):
+        item = get_item(key)
+        suchtitel = request.args.get("titel", "").strip() or None
+        autor = request.args.get("autor", "").strip() or None
+        fehler = ""
+        try:
+            vs = katalog.vorschlaege(lib, item, titel=suchtitel, autor=autor)
+            katalog.merken(item, vs)
+        except katalog.KatalogFehler as exc:
+            vs, fehler = [], str(exc)
+        felder = sorted({k for v in vs for k in v.felder} | set(item.felder))
+        return render_template("katalog.html", item=item, vorschlaege=vs, fehler=fehler, felder=felder,
+                               suchtitel=suchtitel or katalog._brauchbarer_titel(item, lib.pages(key) if (lib.folder(key) / "seiten.jsonl").exists() else []),
+                               autor=autor or "", automatisch=katalog.ist_automatischer_key(key))
+
+    @app.post("/titel/<key>/katalog")
+    def katalog_uebernehmen(key):
+        item = get_item(key)
+        vs = katalog.gemerkt(item)
+        try:
+            v = vs[int(request.form.get("nr", "")) - 1]
+        except (ValueError, IndexError):
+            flash("Diesen Vorschlag gibt es nicht mehr — bitte neu nachschlagen.", "fehler")
+            return redirect(url_for("katalog_seite", key=key))
+        alt = key
+        item = katalog.uebernehmen(lib, item, v, nur_fehlende=bool(request.form.get("nur_fehlende")))
+        after_change(embed=False)
+        flash(f"Angaben aus {v.quelle} übernommen" + (f", neuer Schlüssel {item.citekey} (alter bleibt als Alias)"
+                                                       if item.citekey != alt else "") + ".", "ok")
+        return redirect(url_for("titel", key=item.citekey) + "#metadaten")
+
+    @app.post("/titel/<key>/zusammenfuehren")
+    def zusammenfuehren(key):
+        get_item(key)
+        ziel = request.form.get("ziel", "")
+        get_item(ziel)
+        try:
+            item = ingest.zusammenfuehren(lib, key, ziel)
+        except ValueError as exc:
+            flash(str(exc), "fehler")
+            return redirect(url_for("titel", key=key))
+        after_change(embed=False)
+        flash(f"{key} ist in {item.citekey} aufgegangen; {key} bleibt als Alias zitierbar.", "ok")
+        return redirect(url_for("titel", key=item.citekey))
+
+    @app.get("/pruefen")
+    def pruefen():
+        offen = pruefliste()
+        return render_template("pruefen.html", **offen)
+
+    def pruefliste() -> dict:
+        angaben, seiten, ohne_text = [], [], []
+        for it in lib.items():
+            if it.unvollstaendig or katalog.ist_automatischer_key(it.citekey):
+                angaben.append(it)
+            hat_text = (lib.folder(it.citekey) / "seiten.jsonl").exists()
+            if not hat_text:
+                ohne_text.append(it)
+            elif (it.seitenzaehlung or {}).get("status") in (STATUS_AUTO, STATUS_UNBEKANNT):
+                seiten.append(it)
+        return {"angaben": angaben, "seiten": seiten, "ohne_text": ohne_text}
+
+    app.jinja_env.globals["pruef_anzahl"] = lambda: (lambda o: len(o["angaben"]) + len(o["seiten"]))(pruefliste())
+
     @app.post("/titel/<key>/umbenennen")
     def umbenennen(key):
         item = get_item(key)
@@ -705,6 +781,36 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         return jsonify(job=job.id, url=url_for("job_seite", job_id=job.id),
                        api=url_for("api_job", job_id=job.id), anzahl=len(files))
 
+    @app.post("/aufnehmen/kennung")
+    def aufnehmen_kennung():
+        roh = [x.strip() for x in re.split(r"[\s,;]+", request.form.get("kennungen", "")) if x.strip()]
+        if not roh:
+            flash("DOI oder ISBN angeben.", "fehler")
+            return redirect(url_for("aufnehmen"))
+        tags, projekte = _split_list(request.form.get("tags", "")), _split_list(request.form.get("projekte", ""))
+        mit_pdf = not request.form.get("ohne_pdf")
+
+        def run(job, progress):
+            neu, doppelt, fehler = [], [], []
+            for k in roh:
+                art = "doi" if re.match(r"^(https?://(dx\.)?doi\.org/|doi:)?10\.", k, re.I) else "isbn"
+                try:
+                    item, hinweis = katalog.aufnehmen(lib, **{art: k}, tags=tags, projekte=projekte, pdf=mit_pdf,
+                                                      progress=progress)
+                    neu.append(item.citekey)
+                    if hinweis:
+                        progress(f"{item.citekey}: {hinweis}")
+                except ingest.Duplicate as exc:
+                    doppelt.append({"datei": k, "citekey": exc.item.citekey, "titel": exc.item.title})
+                except katalog.KatalogFehler as exc:
+                    fehler.append({"datei": k, "fehler": str(exc)})
+            if neu:
+                after_change(neu)
+            return {"neu": neu, "doppelt": doppelt, "fehler": fehler}
+
+        job = jobs.submit(f"Aufnehmen: {', '.join(roh)[:60]}", run, art="aufnahme")
+        return redirect(url_for("job_seite", job_id=job.id))
+
     @app.post("/aufnehmen/scans")
     def aufnehmen_scans():
         quelle = request.form.get("quelle", "").strip()
@@ -798,7 +904,7 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
                                sprache=config.ocr_language(), stats=st, bib=bib_executable(),
                                windows=sys.platform == "win32", on_path=on_path,
                                settings_file=config.SETTINGS_FILE, nas=nas, nas_info=info, login=login,
-                               ablage_name=ablage.anzeigename(nas or {}),
+                               ablage_name=ablage.anzeigename(nas or {}), sicherung=_sicherung_info(),
                                zwischenspeicher=_mb(dateien.zwischenspeicher_groesse()))
 
     @app.post("/einstellungen")
@@ -934,6 +1040,28 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         flash("Getrennt. Dateien in der Ablage bleiben erhalten; Originale, die nur dort liegen, "
               "sind ohne Verbindung nicht zu öffnen.", "ok")
         return redirect(url_for("einstellungen") + "#nas")
+
+    def _sicherung_info() -> dict:
+        st = sicherung.status()
+        st["datum"] = time.strftime("%d.%m.%Y %H:%M", time.localtime(st["zuletzt"])) if st["zuletzt"] else ""
+        return st
+
+    app.jinja_env.globals["sicherung_faellig"] = lambda: sicherung.status()["faellig"] and bool(lib.keys())
+
+    @app.post("/sicherung")
+    def sicherung_starten():
+        ziel = request.form.get("ziel", "").strip() or sicherung.status()["ziel"]
+        if not ziel:
+            flash("Zielordner angeben, z. B. /Volumes/Platte/Bibliothek.", "fehler")
+            return redirect(url_for("einstellungen") + "#sicherung")
+
+        def run(job, progress):
+            b = sicherung.sichern(lib, Path(ziel), fortschritt=progress)
+            return {"meldung": f"Gesichert nach {b['ziel']}: {b['kopiert']} lokal kopiert, {b['geholt']} von der Ablage "
+                               f"geholt, {b['unveraendert']} unverändert."
+                               + (f" Fehler: {'; '.join(b['fehler'])}" if b["fehler"] else "")}
+        job = jobs.submit("Sicherung", run, art="sicherung", einmalig=True)
+        return redirect(url_for("job_seite", job_id=job.id))
 
     @app.post("/nas/zwischenspeicher-leeren")
     def nas_zwischenspeicher_leeren():
