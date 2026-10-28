@@ -20,7 +20,10 @@ def scan_bild(lib: Library, item: Item, scan: int) -> Path | None:
     ziel = dateien.zwischenspeicher() / "vorschau" / item.citekey / f"{scan}.jpg"
     if ziel.is_file():
         return ziel
-    bild = _aus_pdf(lib, item, scan) or _aus_ocr(lib, item, scan) or _aus_bilddatei(lib, item, scan)
+    if item.teile() > 1:
+        bild = _geteilt_aus_ocr(lib, item, scan) or _geteilt_aus_pdf(lib, item, scan)
+    else:
+        bild = _aus_pdf(lib, item, scan) or _aus_ocr(lib, item, scan) or _aus_bilddatei(lib, item, scan)
     if bild is None:
         return None
     from PIL import Image
@@ -51,6 +54,54 @@ def _aus_pdf(lib: Library, item: Item, scan: int):
         page = doc[scan - 1]
         breite_pt = page.get_width() or 600
         return page.render(scale=min(3.0, BREITE / breite_pt)).to_pil()
+    finally:
+        doc.close()
+
+
+def _geteilt_aus_ocr(lib: Library, item: Item, scan: int):
+    """Seitenbild aus dem OCR-Lauf (gedreht und am Bund getrennt), Zuordnung über den Dateinamen."""
+    from . import teilung
+
+    n = item.teile()
+    seite, teil = teilung.herkunft(scan, n)
+    lauf, quelle, index = ("spalten/", f"s{seite:05d}-{teil // 2}.png", teil % 2) if n == 4 else ("", f"s{seite:05d}.png", teil)
+    try:
+        report = json.loads(dateien.ocr_datei(lib, item, lauf + "report.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    eintrag = next((e for e in report.get("entries", []) if e.get("source") == quelle), None)
+    if not eintrag or index >= len(eintrag.get("pages", [])):
+        return None
+    try:
+        path = dateien.ocr_datei(lib, item, lauf + eintrag["pages"][index]["image"])
+    except (FileNotFoundError, OSError):
+        return None
+    from PIL import Image
+
+    return Image.open(path)
+
+
+def _geteilt_aus_pdf(lib: Library, item: Item, scan: int):
+    """PDF-Seite mit Textebene: an denselben Grenzen zuschneiden wie der Text."""
+    from . import teilung
+
+    pdf = next((d for d in item.dateien if d.lower().endswith(".pdf")), None)
+    if not pdf:
+        return None
+    try:
+        path = dateien.original(lib, item, pdf)
+    except (FileNotFoundError, OSError):
+        return None
+    import pypdfium2 as pdfium
+
+    seite, teil = teilung.herkunft(scan, item.teile())
+    doc = pdfium.PdfDocument(str(path))
+    try:
+        if seite > len(doc):
+            return None
+        page = doc[seite - 1]
+        bild = page.render(scale=min(3.0, 2 * BREITE / (page.get_width() or 600))).to_pil()
+        return teilung.bild_teile(bild, page, item.teile())[teil]
     finally:
         doc.close()
 

@@ -532,14 +532,43 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
         flash(f"{key} ist in {item.citekey} aufgegangen; {key} bleibt als Alias zitierbar.", "ok")
         return redirect(url_for("titel", key=item.citekey))
 
+    @app.post("/titel/<key>/teilen")
+    def teilen(key):
+        item = get_item(key)
+        art = request.form.get("art", "")
+        if art not in ("aus", "doppelseiten", "spalten", "doppelseiten-spalten"):
+            abort(400, "Unbekannte Teilung.")
+
+        def run(job, progress):
+            neu = ingest.teilen(lib, lib.get(key), art, progress=progress)
+            after_change([key])
+            return {"meldung": f"{neu.text.get('seiten')} Abschnitte, Teilung {art}. Seitenzählung bitte prüfen.",
+                    "neu": [key]}
+        job = jobs.submit(f"Teilen: {item.short}", run, art="ocr")
+        return redirect(url_for("job_seite", job_id=job.id))
+
+    _schritt_cache: dict[str, tuple[int, int]] = {}
+
+    def schritt_hinweis(it: Item) -> int:
+        """Steigt die Zählung pro Abschnitt um 2 oder 4? (zwischengespeichert je Stand von seiten.jsonl)"""
+        path = lib.folder(it.citekey) / "seiten.jsonl"
+        if not path.exists() or it.teile() > 1 or not any(d.lower().endswith(".pdf") for d in it.dateien):
+            return 1
+        stand = path.stat().st_mtime_ns
+        if _schritt_cache.get(it.citekey, (None,))[0] != stand:
+            _schritt_cache[it.citekey] = (stand, pagenums.schritt(lib.pages(it.citekey)))
+        return _schritt_cache[it.citekey][1]
+
     @app.get("/pruefen")
     def pruefen():
         offen = pruefliste()
         return render_template("pruefen.html", **offen)
 
     def pruefliste() -> dict:
-        angaben, seiten, ohne_text = [], [], []
+        angaben, seiten, ohne_text, teilen_vorschlag = [], [], [], []
         for it in lib.items():
+            if schritt_hinweis(it) > 1:
+                teilen_vorschlag.append((it, schritt_hinweis(it)))
             if it.unvollstaendig or katalog.ist_automatischer_key(it.citekey):
                 angaben.append(it)
             hat_text = (lib.folder(it.citekey) / "seiten.jsonl").exists()
@@ -547,9 +576,9 @@ def create_app(lib: Library, *, runner: JobRunner | None = None, auto_sync: bool
                 ohne_text.append(it)
             elif (it.seitenzaehlung or {}).get("status") in (STATUS_AUTO, STATUS_UNBEKANNT):
                 seiten.append(it)
-        return {"angaben": angaben, "seiten": seiten, "ohne_text": ohne_text}
+        return {"angaben": angaben, "seiten": seiten, "ohne_text": ohne_text, "teilen": teilen_vorschlag}
 
-    app.jinja_env.globals["pruef_anzahl"] = lambda: (lambda o: len(o["angaben"]) + len(o["seiten"]))(pruefliste())
+    app.jinja_env.globals["pruef_anzahl"] = lambda: (lambda o: len(o["angaben"]) + len(o["seiten"]) + len(o["teilen"]))(pruefliste())
 
     @app.post("/titel/<key>/umbenennen")
     def umbenennen(key):

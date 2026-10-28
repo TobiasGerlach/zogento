@@ -6,6 +6,29 @@
 {% if sicherung_faellig() %}<p class="meldung hinweis">Die letzte Sicherung ist über zwei Wochen her (oder es gab noch keine).
   <a href="{{ url_for('einstellungen') }}#sicherung">Jetzt sichern</a></p>{% endif %}
 
+{% if teilen %}
+<section class="karte">
+  <h2>Mehrere Seiten pro Scan <span class="zahl">{{ teilen|length }}</span></h2>
+  <p class="leise">Die Zählung steigt pro Scan um 2 (oder 4): Jede PDF-Seite zeigt eine aufgeschlagene Doppelseite
+    (oder Spalten). Bis sie getrennt sind, stimmen die Seitenangaben für die Hälfte des Textes nicht.</p>
+  <table class="titelliste">
+    <tbody>
+    {% for it, s in teilen %}
+      <tr><td class="wer">{{ it.short }}<div class="schluessel">{{ it.citekey }}</div></td>
+        <td><a href="{{ url_for('titel', key=it.citekey) }}#seiten">{{ it.title }}</a>
+          <div class="leise">steigt um {{ s }} pro Scan</div></td>
+        <td class="aktionen">
+          <form method="post" action="{{ url_for('teilen', key=it.citekey) }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <input type="hidden" name="art" value="{{ 'doppelseiten' if s == 2 else 'doppelseiten-spalten' }}">
+            <button type="submit">{{ 'Doppelseiten trennen' if s == 2 else 'In 4 Spalten trennen' }}</button>
+          </form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
 <section class="karte">
   <h2>Angaben fehlen <span class="zahl">{{ angaben|length }}</span></h2>
   {% if angaben %}

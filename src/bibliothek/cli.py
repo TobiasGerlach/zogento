@@ -95,7 +95,8 @@ def cmd_neu(args) -> int:
     for f in args.dateien:
         try:
             item = ingest.add_file(lib, Path(f), eintrag=args.typ, run_ocr=not args.ohne_ocr,
-                                   progress=lambda m: print("  " + m, file=sys.stderr), **_meta_kwargs(args))
+                                   progress=lambda m: print("  " + m, file=sys.stderr), teilung_art=args.teilung,
+                                   **_meta_kwargs(args))
             print(f"+ {item.citekey}  ({item.text.get('seiten', 0)} Seiten, Quelle {item.text.get('quelle')})")
             for h in item.text.get("hinweise", []):
                 print(f"  ! {h}")
@@ -300,6 +301,35 @@ def _parse_range(spec: str) -> set[int]:
     return out
 
 
+def cmd_teilen(args) -> int:
+    """Doppelseiten oder Spalten eines PDFs als eigene Abschnitte erfassen."""
+    lib = _lib()
+    item = lib.resolve(args.titel)
+    if not args.art:
+        from . import pagenums, teilung
+        n = item.teile()
+        art = (item.text.get("teilung") or {}).get("art") or "aus"
+        s = pagenums.schritt(lib.pages(item.citekey))
+        print(f"{item.citekey}: Teilung {art} ({n} Abschnitt(e) pro PDF-Seite)")
+        if s > 1:
+            print(f"  ! Die Zählung steigt pro Abschnitt um {s} — vermutlich "
+                  + ("Doppelseiten: bib teilen " if s == 2 else "Doppelseiten mit Spalten: bib teilen ")
+                  + item.citekey + (" doppelseiten" if s == 2 else " doppelseiten-spalten"))
+        print(f"  Arten: {', '.join(teilung.ARTEN)}")
+        return 0
+    try:
+        item = ingest.teilen(lib, item, args.art, progress=lambda m: print("  " + m, file=sys.stderr))
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"~ {item.citekey}: {item.text.get('seiten')} Abschnitte, Teilung {args.art}")
+    _print_numbering(lib, item)
+    lib.write_refs_bib()
+    _embed_hint(lib)
+    _nach_aenderung(lib)
+    return 0
+
+
 def cmd_bearbeite(args) -> int:
     lib = _lib()
     item = lib.resolve(args.titel)
@@ -448,6 +478,9 @@ def _print_numbering(lib: Library, item) -> None:
     pages = lib.pages(item.citekey)
     by_scan = {p.scan: p for p in pages}
     segs = item.segments()
+    if item.teile() > 1:
+        print(f"  (Scan = Abschnitt; {item.teile()} Abschnitte pro PDF-Seite, Teilung "
+              f"{(item.text.get('teilung') or {}).get('art')})")
     for i, seg in enumerate(segs):
         end = segs[i + 1]["ab_scan"] - 1 if i + 1 < len(segs) else (pages[-1].scan if pages else seg["ab_scan"])
         mark = "geprüft" if seg.get("geprueft") or sz.get("status") == STATUS_BESTAETIGT else "geschätzt"
@@ -806,6 +839,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--doi", action="append", default=[], help="per DOI aufnehmen (Angaben aus Crossref/OpenAlex, PDF falls frei)")
     s.add_argument("--isbn", action="append", default=[], help="per ISBN aufnehmen (Angaben aus DNB/Open Library)")
     s.add_argument("--ohne-pdf", action="store_true", help="mit --doi: kein frei zugängliches PDF laden")
+    s.add_argument("--teilung", choices=["aus", "doppelseiten", "spalten", "doppelseiten-spalten"],
+                   help="PDF-Seiten teilen (Standard: Doppelseiten automatisch erkennen)")
     s.set_defaults(func=cmd_neu)
 
     s = sub.add_parser("scans", help="Buchfotos (Ordner) oder Immich-Link per OCR erfassen")
@@ -822,6 +857,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--jahr")
     s.add_argument("--feld", action="append")
     s.set_defaults(func=cmd_ocr_uebernehmen)
+
+    s = sub.add_parser("teilen", help="Doppelseiten/Spalten eines PDFs als eigene Abschnitte erfassen")
+    s.add_argument("titel")
+    s.add_argument("art", nargs="?", choices=["aus", "doppelseiten", "spalten", "doppelseiten-spalten"],
+                   help="doppelseiten: 2 Seiten pro PDF-Seite (S.); spalten: 2 Spalten (Sp.); "
+                        "doppelseiten-spalten: 4 Spalten (Sp.); aus: nicht teilen. Ohne Angabe: Stand anzeigen")
+    s.set_defaults(func=cmd_teilen)
 
     s = sub.add_parser("bearbeite", help="Felder, Tags, Kategorien, Projekte ändern")
     s.add_argument("titel")

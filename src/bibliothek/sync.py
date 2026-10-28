@@ -158,6 +158,9 @@ def _journal_anwenden(lib: Library, dav, z: _Zustand, bericht: dict) -> None:
             dav.loeschen(f"titel/{e['key']}")
             dav.loeschen(f"ocr/{e['key']}")
             z.vergessen(e["key"])
+        elif e["op"] == "ocr_loeschen":
+            # Lauf wurde neu erstellt (z. B. mit anderer Teilung): alten auf der Ablage ersetzen
+            dav.loeschen(f"ocr/{e['key']}")
         elif e["op"] == "umbenennen":
             for base in ("titel", "ocr"):
                 if dav.info(f"{base}/{e['von']}"):

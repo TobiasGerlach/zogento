@@ -17,7 +17,7 @@ from .store import Page
 
 _ALONE = re.compile(r"^\D{0,3}(\d{1,4})\D{0,3}$")
 _LEAD = re.compile(r"^(\d{1,4})\s+\S")
-_TRAIL = re.compile(r"\S\s+(\d{1,4})$")
+_TRAIL = re.compile(r"\S(?:\s+|\s*[/|]\s*)(\d{1,4})$")   # „… 45“, „Kolumnentitel/45“, „… | 45“
 WINDOW = 8       # so viele Nachbarseiten stimmen über einen Versatz ab
 MIN_VOTES = 3    # … und so viele müssen ihn stützen
 
@@ -69,6 +69,24 @@ def detect(pages: list[Page]) -> dict | None:
         what = f"{d} Druckseite(n) fehlen im Scan" if d > 0 else f"{-d} Seite(n) vermutlich doppelt gescannt"
         jumps.append(f"Bei Scan {seg['ab_scan']} springt die Zählung um {d:+d}: {what}.")
     return {"segmente": segments, "treffer": support, "quote": round(support / len(scans), 2), "spruenge": jumps}
+
+
+def schritt(pages: list[Page]) -> int:
+    """Um wie viel steigt die Zählung von Scan zu Scan? 2 heißt meist: Doppelseiten, 4: Doppelseiten mit Spalten.
+
+    Gibt 1 zurück, wenn kein anderer Schritt klar überwiegt.
+    """
+    cands = [candidates(p.text) for p in pages if len(p.text) >= 200]
+    votes = Counter()
+    for a, b in zip(cands, cands[1:]):
+        for x in a:
+            for d in (1, 2, 4):
+                if x + d in b:
+                    votes[d] += 1
+    if not votes:
+        return 1
+    best, n = votes.most_common(1)[0]
+    return best if best > 1 and n >= max(3, 2 * votes[1]) else 1
 
 
 def offset_for(segments: list[dict], scan: int) -> int | None:

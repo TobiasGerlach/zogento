@@ -73,8 +73,11 @@ def extract(path: Path) -> Extracted:
 
 # --- PDF -------------------------------------------------------------------------
 
-def extract_pdf(path: Path) -> Extracted:
+def extract_pdf(path: Path, teile: int = 1) -> Extracted:
+    """teile > 1: jede PDF-Seite in so viele Abschnitte teilen (Doppelseiten, Spalten; siehe teilung.py)."""
     import pypdfium2 as pdfium
+
+    from . import teilung
 
     try:
         doc = pdfium.PdfDocument(str(path))
@@ -83,14 +86,16 @@ def extract_pdf(path: Path) -> Extracted:
     pages, missing, labels = [], [], 0
     for i in range(len(doc)):
         page = doc[i]
-        text = page.get_textpage().get_text_bounded()
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        label = doc.get_page_label(i) or None
+        texte = teilung.pdf_text_teile(page, teile) if teile > 1 else [page.get_textpage().get_text_bounded()]
+        label = (doc.get_page_label(i) or None) if teile == 1 else None   # Labels gelten für die ganze PDF-Seite
         if label and label != str(i + 1):
             labels += 1
-        if len(re.sub(r"\s", "", text)) < config.MIN_TEXT_CHARS:
-            missing.append(i + 1)
-        pages.append(Page(i + 1, _clean(text), label))
+        for j, text in enumerate(texte):
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            scan = i * teile + j + 1
+            if len(re.sub(r"\s", "", text)) < config.MIN_TEXT_CHARS:
+                missing.append(scan)
+            pages.append(Page(scan, _clean(text), label))
     meta = {k.lower(): v for k, v in doc.get_metadata_dict().items() if v and k in ("Title", "Author")}
     doc.close()
     ex = Extracted(pages, "pdf", True, meta)

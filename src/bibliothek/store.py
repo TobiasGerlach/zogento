@@ -118,19 +118,36 @@ class Item:
             return p.label
         return None
 
+    def teile(self) -> int:
+        """Wie viele Seiten/Spalten ein PDF-Scan enthält (Doppelseiten: 2), aufgeteilt in eigene Abschnitte."""
+        return int((self.text.get("teilung") or {}).get("teile", 1))
+
+    def scan_name(self, scan: int) -> str:
+        """„Scan 57“ — bei geteilten Scans die Stelle im PDF: „PDF-S. 10 rechts“, „PDF-S. 3, Spalte 2/4“."""
+        n = self.teile()
+        if n == 1:
+            return f"Scan {scan}"
+        seite, teil = (scan - 1) // n + 1, (scan - 1) % n
+        if n == 2:
+            return f"PDF-S. {seite} {'links' if teil == 0 else 'rechts'}"
+        return f"PDF-S. {seite}, Spalte {teil + 1}/{n}"
+
     def page_ref(self, p: Page) -> str:
         """Seitenangabe für Ausgaben. Unsichere Angaben sind als solche markiert."""
-        status = (self.seitenzaehlung or {}).get("status")
+        sz = self.seitenzaehlung or {}
+        status = sz.get("status")
         if status == STATUS_KEINE:
             return f"Abschn. {p.scan}"
+        einheit = sz.get("einheit") or "S."
         num = self.page_number(p)
+        wo = self.scan_name(p.scan)
         if num is None:
-            return f"Scan {p.scan} (Druckseite ungeklärt)"
+            return f"{wo} ({'Spalte' if einheit == 'Sp.' else 'Druckseite'} ungeklärt)"
         if status == STATUS_AUTO and not (self._segment(p.scan) or {}).get("geprueft"):
-            return f"S. {num}? (Scan {p.scan}, Seitenzahl geschätzt)"
-        if self.text.get("quelle") == "pdf" and str(num) == str(p.scan):
-            return f"S. {num}"
-        return f"S. {num} (Scan {p.scan})"
+            return f"{einheit} {num}? ({wo}, {'Spaltenzahl' if einheit == 'Sp.' else 'Seitenzahl'} geschätzt)"
+        if self.text.get("quelle") == "pdf" and str(num) == str(p.scan) and self.teile() == 1:
+            return f"{einheit} {num}"
+        return f"{einheit} {num} ({wo})"
 
     def citable(self, p: Page) -> bool:
         """Darf diese Seitenangabe so zitiert werden (geprüft oder aus dem PDF)?"""

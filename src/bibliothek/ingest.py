@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from . import bibtex, dateien, extract, index, ocr, pagenums
+from . import bibtex, dateien, extract, index, ocr, pagenums, teilung
 from .store import (STATUS_AUTO, STATUS_KEINE, STATUS_PDF, STATUS_UNBEKANNT, Item, Library, Page)
 
 Progress = Callable[[str], None]
@@ -65,7 +65,9 @@ def _finish(lib: Library, item: Item, pages: list[Page], *, reindex: bool) -> It
 def add_file(lib: Library, path: Path, *, felder: dict[str, str] | None = None, eintrag: str | None = None,
              citekey: str | None = None, tags: list[str] | None = None, kategorien: list[str] | None = None,
              projekte: list[str] | None = None, run_ocr: bool = True, allow_duplicate: bool = False,
-             reindex: bool = True, herkunft: str = "", progress: Progress | None = None) -> Item:
+             reindex: bool = True, herkunft: str = "", progress: Progress | None = None,
+             teilung_art: str | None = None) -> Item:
+    """teilung_art: siehe teilung.ARTEN; None = bei PDFs automatisch (Doppelseiten, wenn die Zählung um 2 springt)."""
     progress = progress or (lambda _: None)
     path = Path(path).expanduser().resolve()
     summe = pruefsumme(path)
@@ -96,6 +98,10 @@ def add_file(lib: Library, path: Path, *, felder: dict[str, str] | None = None, 
     item.text = {"quelle": ex.quelle, "sha256": [summe]}
 
     pages = ex.pages
+    teile, einheit = teilung.ARTEN.get(teilung_art or "aus", (1, "S."))
+    if ex.quelle == "pdf" and teile > 1:
+        ex = extract.extract_pdf(target, teile)
+        pages = ex.pages
     if ex.ocr_noetig and run_ocr:
         try:
             if ex.quelle == "bild":
@@ -104,7 +110,8 @@ def add_file(lib: Library, path: Path, *, felder: dict[str, str] | None = None, 
                 item.text["ocr_ordner"] = str(dateien.ocr_workdir(lib, key))
             else:
                 progress(f"OCR für {len(ex.ocr_noetig)} Seite(n) ohne Textebene")
-                recognized = ocr.ocr_pdf_pages(target, ex.ocr_noetig, dateien.ocr_workdir(lib, key), progress=progress)
+                recognized = ocr.ocr_pdf_pages(target, ex.ocr_noetig, dateien.ocr_workdir(lib, key), progress=progress,
+                                               teile=teile)
                 for p in pages:
                     if p.scan in recognized:
                         p.text, p.konfidenz = recognized[p.scan].text, recognized[p.scan].konfidenz
@@ -119,8 +126,20 @@ def add_file(lib: Library, path: Path, *, felder: dict[str, str] | None = None, 
     elif ex.ocr_noetig:
         hinweise.append(f"{len(ex.ocr_noetig)} Seite(n) ohne Text, OCR übersprungen.")
     item.text["hinweise"] = hinweise
+    if teile > 1:
+        item.text["teilung"] = {"teile": teile, "art": teilung_art}
     has_labels = any(p.label for p in pages)
     _numbering(item, pages, ex.paginiert, has_labels)
+    if einheit != "S.":
+        item.seitenzaehlung["einheit"] = einheit
+    if teilung_art is None and ex.quelle == "pdf" and pagenums.schritt(pages) == 2:
+        # Zählung springt pro Scan um 2: kopierte Doppelseiten — getrennt neu erfassen
+        progress("Doppelseiten erkannt — jede Seite wird ein eigener Abschnitt")
+        item = _finish(lib, item, pages, reindex=False)
+        item = teilen(lib, item, "doppelseiten", run_ocr=run_ocr, reindex=reindex, progress=progress)
+        item.text.setdefault("hinweise", []).append("Doppelseiten erkannt und getrennt (bib teilen, falls falsch).")
+        lib.save(item)
+        return item
     return _finish(lib, item, pages, reindex=reindex)
 
 
@@ -174,20 +193,58 @@ def _ocr_single_image(image: Path, out: Path, progress: Progress) -> list[Page]:
 
 
 def reocr(lib: Library, item: Item, *, progress: Progress | None = None) -> Item:
-    """Alle Seiten eines PDFs neu erkennen (z. B. schlechte eingebettete Textebene)."""
+    """Alle Seiten eines PDFs neu erkennen (z. B. schlechte eingebettete Textebene); Teilung bleibt."""
+    art = (item.text.get("teilung") or {}).get("art") or "aus"
+    return teilen(lib, item, art, alles_erkennen=True, progress=progress)
+
+
+def teilen(lib: Library, item: Item, art: str, *, alles_erkennen: bool = False, run_ocr: bool = True,
+           reindex: bool = True, progress: Progress | None = None) -> Item:
+    """Text eines PDFs mit neuer Teilung erfassen (siehe teilung.ARTEN). Seitenzählung wird neu geschätzt.
+
+    Seiten mit Textebene werden geteilt ausgelesen; Scan-Seiten neu erkannt (OCR), ebenso alle mit alles_erkennen.
+    """
+    if art not in teilung.ARTEN:
+        raise ValueError(f"Teilung {art!r} unbekannt — {', '.join(teilung.ARTEN)}")
     pdfs = [f for f in item.dateien if f.lower().endswith(".pdf")]
     if not pdfs:
-        raise ValueError("Kein PDF zum Neu-Erkennen vorhanden")
-    pages = lib.pages(item.citekey)
-    out = dateien.ocr_workdir(lib, item.citekey)
+        raise ValueError("Teilen geht nur bei PDFs.")
+    progress = progress or (lambda _: None)
+    teile, einheit = teilung.ARTEN[art]
     pdf = dateien.original(lib, item, pdfs[0])   # mit NAS: vorher herunterladen
-    recognized = ocr.ocr_pdf_pages(pdf, [p.scan for p in pages], out, progress=progress)
-    for p in pages:
-        if p.scan in recognized:
-            p.text, p.konfidenz = recognized[p.scan].text, recognized[p.scan].konfidenz
-    item.text["quelle"] = "ocr"
-    item.text["ocr_ordner"] = str(out)
-    return _finish(lib, item, pages, reindex=True)
+    shutil.rmtree(dateien.zwischenspeicher() / "vorschau" / item.citekey, ignore_errors=True)
+    ex = extract.extract_pdf(pdf, teile)
+    pages = ex.pages
+    war_ocr = (item.text.get("quelle") or "") in ("ocr", "pdf+ocr")
+    zu_erkennen = [p.scan for p in pages] if alles_erkennen or item.text.get("quelle") == "ocr" else ex.ocr_noetig
+    alt_ocr = dateien.ocr_ort(item) or ""
+    if zu_erkennen and run_ocr:
+        out = dateien.ocr_workdir(lib, item.citekey)
+        if out.exists():
+            shutil.rmtree(out)
+        progress(f"OCR für {len(zu_erkennen)} Abschnitt(e)")
+        recognized = ocr.ocr_pdf_pages(pdf, zu_erkennen, out, progress=progress, teile=teile)
+        for p in pages:
+            if p.scan in recognized:
+                p.text, p.konfidenz = recognized[p.scan].text, recognized[p.scan].konfidenz
+        item.text["quelle"] = "ocr" if len(zu_erkennen) == len(pages) else "pdf+ocr"
+        item.text["ocr_ordner"] = str(out)
+        conf = [p.konfidenz for p in pages if p.konfidenz is not None]
+        if conf:
+            item.text["konfidenz"] = round(sum(conf) / len(conf), 1)
+        if alt_ocr.startswith(dateien.NAS_PREFIX):
+            lib._journal({"op": "ocr_loeschen", "key": item.citekey})   # alter Lauf passt nicht mehr
+    elif war_ocr and not zu_erkennen:
+        item.text["quelle"] = "pdf"
+    if teile > 1:
+        item.text["teilung"] = {"teile": teile, "art": art}
+    else:
+        item.text.pop("teilung", None)
+    _numbering(item, pages, True, any(p.label for p in pages))
+    if einheit != "S.":
+        item.seitenzaehlung["einheit"] = einheit
+    item.text.setdefault("hinweise", [])
+    return _finish(lib, item, pages, reindex=reindex)
 
 
 _JUNK_TITLE = re.compile(

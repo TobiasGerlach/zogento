@@ -56,27 +56,56 @@ def ocr_album(url: str, output: Path, *, progress: Progress | None = None,
 
 
 def ocr_pdf_pages(pdf: Path, scans: list[int], output: Path, *, progress: Progress | None = None,
-                  dpi: int = 300) -> dict[int, Page]:
-    """Die genannten PDF-Seiten rendern und einzeln erkennen."""
+                  dpi: int = 300, teile: int = 1) -> dict[int, Page]:
+    """Die genannten Abschnitte eines PDFs rendern und erkennen.
+
+    teile = 2: die Pipeline trennt jede PDF-Seite am Bund (auch gedrehte Doppelseiten);
+    teile = 4: danach jede Hälfte noch einmal an der Spaltengrenze (zweiter Lauf in output/spalten).
+    """
     import pypdfium2 as pdfium
 
     _env()
     progress = progress or (lambda _: None)
     images = output / "pdfseiten"
     images.mkdir(parents=True, exist_ok=True)
+    pdf_seiten = sorted({(n - 1) // teile + 1 for n in scans})
     doc = pdfium.PdfDocument(str(pdf))
-    for n in scans:
+    for n in pdf_seiten:
         target = images / f"s{n:05d}.png"
         if not target.exists():
             doc[n - 1].render(scale=dpi / 72, grayscale=True).to_pil().save(target)
         progress(f"Seite {n} gerendert")
     doc.close()
-    ocr_folder(images, output, single_page=True, order="filename", progress=progress)
+    ocr_folder(images, output, single_page=teile == 1, order="filename", progress=progress)
+    lauf = output
+    if teile == 4:
+        import shutil
+
+        haelften = output / "haelften"
+        haelften.mkdir(exist_ok=True)
+        for source, i, image in _report_images(output):
+            shutil.copy2(output / image, haelften / f"{Path(source).stem}-{i}.png")
+        lauf = output / "spalten"
+        ocr_folder(haelften, lauf, single_page=False, order="filename", progress=progress)
+    teile_je_seite: dict[int, list[Page]] = {}
+    for source, page in _report_pages(lauf):
+        n = int(Path(source).stem[1:].split("-")[0])
+        teile_je_seite.setdefault(n, []).append(page)
     result: dict[int, Page] = {}
-    for source, page in _report_pages(output):
-        n = int(Path(source).stem[1:])
-        result[n] = Page(n, page.text, None, page.konfidenz)
+    for n, liste in teile_je_seite.items():
+        liste = (liste + [Page(0, "")] * teile)[:teile]   # Pipeline lieferte weniger Teile: leer auffüllen
+        for j, page in enumerate(liste):
+            scan = (n - 1) * teile + j + 1
+            if scan in scans:
+                result[scan] = Page(scan, page.text, None, page.konfidenz)
     return result
+
+
+def _report_images(output: Path) -> list[tuple[str, int, str]]:
+    """(Quelle, Teil, Seitenbild) je erkannter Seite eines Laufs."""
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    return [(e.get("source", ""), i, p["image"]) for e in report.get("entries", [])
+            for i, p in enumerate(e.get("pages", [])) if p.get("image")]
 
 
 def _report_pages(output: Path) -> list[tuple[str, Page]]:
